@@ -24,8 +24,11 @@ BACKOFF_MAX_S = 600
 @shared_task(
     bind=True, name="django_siteintel.run_source", queue=QUEUE_DEFAULT, acks_late=True, max_retries=MAX_RETRIES
 )
-def run_source(self, audit_id: str, source: str) -> None:
-    report = Report.objects.select_related("audit").get(audit_id=audit_id, source=source)
+def run_source(self, audit_id: str, source: str, run_id: str | None = None) -> None:
+    reports = Report.objects.select_related("audit").filter(audit_id=audit_id, source=source, audit__run_id=run_id)
+    report = reports.first()
+    if report is None:
+        return  # a rerun replaced this run (or a message queued without `run_id`): never write to the new run
     try:
         if not report_service.run(report):
             _schedule_poll(report)

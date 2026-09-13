@@ -19,5 +19,5 @@ def run_audit(audit_id: str) -> None:
     if not claimed.update(status=AuditStatus.RUNNING, modified_at=timezone.now()):
         return  # already run elsewhere (development run-now)
     audit = Audit.objects.get(pk=audit_id)
-    sources = audit.reports.values_list("source", flat=True)
-    chord(run_source.si(audit_id, source) for source in sources)(finish_audit.si(audit_id, str(audit.run_id)))
+    sources, run_id = audit.reports.values_list("source", flat=True), str(audit.run_id)
+    chord(run_source.si(audit_id, source, run_id) for source in sources)(finish_audit.si(audit_id, run_id))

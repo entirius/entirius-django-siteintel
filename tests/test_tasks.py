@@ -90,7 +90,7 @@ def test_late_worker_run_never_reopens_an_audit_finished_by_run_now(db, recordin
 
     run_audit(str(audit.pk))
     for source in ("heuristic", "lighthouse", "urlscan"):
-        run_source(str(audit.pk), source)
+        run_source(str(audit.pk), source, str(audit.run_id))
 
     assert chords == [] and len(recordings.calls) == calls_before
     assert Audit.objects.get(pk=audit.pk).status == AuditStatus.COMPLETED
@@ -126,7 +126,7 @@ def test_run_source_unexpected_error_fails_report(db, recordings, monkeypatch):
         raise RuntimeError("boom with details that must not be stored")
 
     monkeypatch.setattr("django_siteintel.services.report_service.run", explode)
-    run_source(str(audit.pk), "heuristic")  # returns normally: the chord still reaches finish_audit
+    run_source(str(audit.pk), "heuristic", str(audit.run_id))  # returns normally: the chord still reaches finish_audit
 
     report = Report.objects.get(audit=audit, source="heuristic")
     assert (report.status, report.error_code, report.error_detail) == ("failed", "internal", "RuntimeError")
@@ -162,6 +162,24 @@ def test_stale_poll_ignored_after_rerun(db, recordings, monkeypatch):
 
     assert len(recordings.calls) == calls_before and dispatched == []
     assert set(Report.objects.filter(audit=audit).values_list("status", flat=True)) == {ReportStatus.PENDING}
+    assert Audit.objects.get(pk=audit.pk).status == AuditStatus.RUNNING
+
+
+def test_stale_run_source_ignored_after_rerun(db, recordings, monkeypatch):
+    audit = audit_service.run_now(_audit())
+    old_run_id = str(audit.run_id)
+    monkeypatch.setattr("django_siteintel.tasks.run_audit.delay", lambda audit_id: None)
+    audit_service.rerun_audit(audit=audit, requested_by="cms:admin")
+    Audit.objects.filter(pk=audit.pk).update(status=AuditStatus.RUNNING)  # the new run has started
+    calls_before = len(recordings.calls)
+
+    for source in ("heuristic", "lighthouse", "urlscan"):
+        run_source(str(audit.pk), source, old_run_id)  # e.g. an upstream retry of the old run after its countdown
+        run_source(str(audit.pk), source)  # a message queued before `run_id` was part of the signature
+
+    assert len(recordings.calls) == calls_before
+    reports = Report.objects.filter(audit=audit).values_list("status", "raw", "retry_count", "error_code")
+    assert list(reports) == [(ReportStatus.PENDING, {}, 0, "")] * 3
     assert Audit.objects.get(pk=audit.pk).status == AuditStatus.RUNNING
 
 
