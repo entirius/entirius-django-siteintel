@@ -79,3 +79,18 @@ def test_S04_urlscan_poll_deadline_fails_timeout_no_sleep(db, http, monkeypatch)
 
 def test_run_audit_task_name_and_queue():
     assert (run_audit.name, run_audit.queue) == ("django_siteintel.run_audit", "siteintel_default")
+
+
+def test_unexpected_payload_shape_fails_invalid_instead_of_raising(db, recordings):
+    recordings.add(
+        f"{PSI}/{DOMAIN}.desktop.json", FakeResponse(200, {"lighthouseResult": {"categories": ["not", "a", "dict"]}})
+    )
+    audit = audit_service.run_now(_audit())
+
+    lighthouse = Report.objects.get(audit=audit, source="lighthouse")
+    assert (lighthouse.status, lighthouse.error_code, lighthouse.error_detail) == (
+        "failed",
+        "invalid",
+        "lighthouse: AttributeError",
+    )
+    assert audit.status == AuditStatus.PARTIALLY_COMPLETED

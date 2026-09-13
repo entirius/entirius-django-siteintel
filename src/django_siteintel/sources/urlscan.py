@@ -9,7 +9,7 @@ import requests
 from django_siteintel import settings as siteintel_settings
 from django_siteintel.enums import ErrorCode
 from django_siteintel.models import Audit
-from django_siteintel.security import assert_safe_url, safe_get
+from django_siteintel.security import safe_get, safe_post
 from django_siteintel.sources.base import (
     SourceError,
     SourceFetcher,
@@ -68,17 +68,9 @@ class UrlscanSource(SourceFetcher):
 
 
 def _submit(url: str, audit: Audit) -> dict:
-    assert_safe_url(url, allowed_hosts=siteintel_settings.value("SITEINTEL_ALLOWED_HOSTS"))
-    response = requests.post(
-        url,
-        json={"url": audit.url, "visibility": "unlisted"},
-        headers={"API-Key": api_key(UrlscanSource.name)},
-        timeout=siteintel_settings.value("SITEINTEL_FETCH_TIMEOUT_S"),
-        allow_redirects=False,
-    )
-    with response:
-        response.raise_for_status()
-        return response.json()
+    options = fetch_options()
+    payload = {"url": audit.url, "visibility": "unlisted"}
+    return parse_json(safe_post(url, payload, {"API-Key": api_key(UrlscanSource.name)}, **options), url)
 
 
 def _base() -> str:

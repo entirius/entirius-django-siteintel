@@ -6,7 +6,7 @@
 
 Copied from `django_lookup.security.url_guard` (a sibling copy, never a shared import — siteintel must not
 depend on a catalog module), reading `SITEINTEL_BLOCK_PRIVATE_HOSTS` through `block_private_hosts()`.
-Two additions for the heuristic source: `Fetched.redirects` counts the hops followed, and the cap error
+Additions: `safe_post` (the urlscan submission, capped like a GET) and, for the heuristic source, `Fetched.redirects` counts the hops followed, and the cap error
 `BodyTooLarge` keeps the bytes received so a truncated page can still be analysed (S-06).
 
 `SITEINTEL_BLOCK_PRIVATE_HOSTS = False` drops the IP check wholesale (zeno dev, where the fixtures container
@@ -92,6 +92,19 @@ def safe_get(url: str, timeout: float, cap: int, allowed_hosts: Iterable[str] = 
             content = _body(response, cap, hop)
             return Fetched(content=content, content_type=response.headers.get("Content-Type", ""), redirects=hop)
     raise ValueError(f"too many redirects (> {MAX_REDIRECTS}) fetching {url}")
+
+
+def safe_post(
+    url: str, payload: dict, headers: dict, timeout: float, cap: int, allowed_hosts: Iterable[str] = ()
+) -> Fetched:
+    """POST JSON to a validated host; redirects are refused and the body is capped like `safe_get`."""
+    assert_safe_url(url, allowed_hosts=allowed_hosts)
+    response = requests.post(url, json=payload, headers=headers, timeout=timeout, stream=True, allow_redirects=False)
+    with response:
+        if response.status_code in _REDIRECT_STATUS_CODES:
+            raise ValueError("redirect refused on POST")
+        response.raise_for_status()
+        return Fetched(content=_body(response, cap, 0), content_type=response.headers.get("Content-Type", ""))
 
 
 def _location(response: requests.Response) -> str:

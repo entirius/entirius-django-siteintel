@@ -52,7 +52,11 @@ def poll(report: Report, uuid: str, deadline: datetime) -> bool:
 def complete(report: Report, raw: dict, started: datetime) -> None:
     source = get_source(report.source)
     source.validate(raw)
-    processed = clean_snapshot(source.process(raw))
+    try:
+        processed = clean_snapshot(source.process(raw))
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        # An unexpected payload shape must end the report, never escape the chord header task.
+        raise SourceError(ErrorCode.INVALID, f"{report.source}: {type(exc).__name__}") from None
     status = ReportStatus.PARTIAL if raw.get("truncated") else ReportStatus.COMPLETED
     error_code = ErrorCode.TRUNCATED if raw.get("truncated") else ""
     duration = (timezone.now() - started).total_seconds()
