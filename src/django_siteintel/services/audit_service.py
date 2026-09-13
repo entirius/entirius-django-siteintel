@@ -58,19 +58,22 @@ class AuditRunningError(Exception):
 
 def rerun_audit(*, audit: Audit, requested_by: str) -> Audit:
     """Same audit row, reports reset to pending, expiry extended, a new run queued (S-09); refused while running."""
+    fields = {
+        "status": AuditStatus.PENDING,
+        "requested_by": requested_by,
+        "expires_at": _expiry(),
+        "run_id": uuid.uuid4(),
+        "modified_at": timezone.now(),
+    }
     with transaction.atomic():
-        audit.status, audit.requested_by, audit.expires_at = AuditStatus.PENDING, requested_by, _expiry()
-        audit.run_id, audit.modified_at = uuid.uuid4(), timezone.now()
-        fields = {
-            name: getattr(audit, name) for name in ("status", "requested_by", "expires_at", "run_id", "modified_at")
-        }
         if not Audit.objects.filter(pk=audit.pk).exclude(status=AuditStatus.RUNNING).update(**fields):
-            raise AuditRunningError(str(audit.pk))
+            raise AuditRunningError(str(audit.pk))  # the caller's instance is left untouched
         audit.reports.update(
             status=ReportStatus.PENDING, raw={}, processed={}, retry_count=0, duration_s=None, error_code="",
             error_detail="", modified_at=timezone.now(),
         )  # fmt: skip
         _dispatch_run(audit)
+    audit.refresh_from_db()
     return audit
 
 
@@ -84,17 +87,28 @@ def fail_stuck_audits(now: datetime | None = None) -> int:
     """Audits `running` longer than `SITEINTEL_AUDIT_STUCK_MINUTES` fail, with their unfinished reports."""
     now = now or timezone.now()
     cutoff = now - timedelta(minutes=siteintel_settings.value("SITEINTEL_AUDIT_STUCK_MINUTES"))
+    stuck = Audit.objects.filter(status=AuditStatus.RUNNING, modified_at__lt=cutoff).values_list("pk", flat=True)
+    return sum(_fail_stuck_audit(audit_id, cutoff, now) for audit_id in list(stuck))
+
+
+def _fail_stuck_audit(audit_id, cutoff: datetime, now: datetime) -> bool:
+    """Like `report_service.finish`: the locked row is re-checked, `report_ready` is sent once after the commit."""
     with transaction.atomic():
-        stuck = Audit.objects.select_for_update().filter(status=AuditStatus.RUNNING, modified_at__lt=cutoff)
-        audit_ids = list(stuck.values_list("pk", flat=True))
-        unfinished = Report.objects.filter(audit_id__in=audit_ids).exclude(status__in=FINISHED_REPORT_STATUSES)
+        audit = Audit.objects.select_for_update().get(pk=audit_id)
+        if audit.status != AuditStatus.RUNNING or audit.modified_at >= cutoff:
+            return False  # finished or rerun since the scan
+        unfinished = audit.reports.exclude(status__in=FINISHED_REPORT_STATUSES)
         unfinished.update(
             status=ReportStatus.FAILED,
             error_code=ErrorCode.TIMEOUT,
             error_detail="audit stuck running",
             modified_at=now,
         )
-        return Audit.objects.filter(pk__in=audit_ids).update(status=AuditStatus.FAILED, modified_at=now)
+        succeeded = sorted(audit.reports.filter(status__in=SUCCEEDED_REPORT_STATUSES).values_list("source", flat=True))
+        audit.status = AuditStatus.FAILED
+        audit.save(update_fields=["status", "modified_at"])
+        transaction.on_commit(lambda: report_ready.send(sender=Audit, audit=audit, succeeded_sources=succeeded))
+    return True
 
 
 def run_now(audit: Audit) -> Audit:

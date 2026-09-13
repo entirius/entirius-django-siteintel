@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from django_siteintel.enums import AuditStatus, ReportStatus
 from django_siteintel.models import Audit, Report
-from django_siteintel.services import audit_service
+from django_siteintel.services import audit_service, report_service
 from django_siteintel.signals import report_ready
 from tests.conftest import CHANNEL_IDX, DOMAIN
 
@@ -137,3 +137,32 @@ def test_sweeper_fails_stuck_audits(db, recordings, settings):
         ("lighthouse", "failed", "timeout"),
         ("urlscan", "failed", "timeout"),
     ]
+
+
+def test_sweeper_sends_report_ready_once(db, recordings, settings, signals, django_capture_on_commit_callbacks):
+    settings.SITEINTEL_AUDIT_STUCK_MINUTES = 30
+    stuck = _request()
+    Audit.objects.filter(pk=stuck.pk).update(
+        status=AuditStatus.RUNNING, modified_at=timezone.now() - timedelta(hours=1)
+    )
+    Report.objects.filter(audit=stuck, source="heuristic").update(status=ReportStatus.COMPLETED)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        assert audit_service.fail_stuck_audits() == 1
+        assert signals == []  # sent after the commit, never from inside the transaction
+    with django_capture_on_commit_callbacks(execute=True):
+        assert audit_service.fail_stuck_audits() == 0
+        assert report_service.finish(stuck.pk)  # a late finish_audit of the swept run
+
+    assert signals == [(stuck.pk, ["heuristic"])]
+
+
+def test_rerun_conflict_leaves_instance_unchanged(db, recordings):
+    audit = _request()
+    Audit.objects.filter(pk=audit.pk).update(status=AuditStatus.RUNNING)
+    before = (audit.status, audit.run_id, audit.requested_by, audit.expires_at, audit.modified_at)
+
+    with pytest.raises(audit_service.AuditRunningError):
+        audit_service.rerun_audit(audit=audit, requested_by="cms:admin")
+
+    assert (audit.status, audit.run_id, audit.requested_by, audit.expires_at, audit.modified_at) == before
