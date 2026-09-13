@@ -19,6 +19,7 @@ from django_siteintel.services import audit_service
 from django_siteintel.utils.domains import normalise_domain
 
 _TAGS = ["Siteintel"]
+INVALID_DOMAIN = "Not a domain or http(s) URL."
 
 
 class AuditPagination(PageNumberPagination):
@@ -67,8 +68,10 @@ class AuditListView(AdminView):
     )
     def post(self, request: Request, channel_idx: str) -> Response:
         body = parse(AuditCreateRequest, request.data)
-        _domain(body.domain_or_url)
-        audit = audit_service.request_audit(channel_idx=channel_idx, **body.model_dump())
+        try:
+            audit = audit_service.request_audit(channel_idx=channel_idx, **body.model_dump())
+        except ValueError:
+            raise ValidationError({"domain_or_url": [INVALID_DOMAIN]}) from None
         status = 200 if audit.status in REUSABLE_AUDIT_STATUSES else 201
         return Response(AuditResponse.model_validate(audit).model_dump(mode="json"), status=status)
 
@@ -103,4 +106,4 @@ def _domain(domain_or_url: str) -> str:
     try:
         return normalise_domain(domain_or_url)[0]
     except ValueError:
-        raise ValidationError({"domain_or_url": ["Not a domain or http(s) URL."]}) from None
+        raise ValidationError({"domain": [INVALID_DOMAIN]}) from None
