@@ -11,6 +11,7 @@ eTLD+1 = the last two host labels, or three when the last two form a known multi
 import ipaddress
 from urllib.parse import urlparse
 
+MAX_URL_LENGTH = 2048  # `Audit.url` column size, checked after the scheme is added
 MULTI_PART_SUFFIXES = frozenset(
     {"com.pl", "net.pl", "org.pl", "co.uk", "org.uk", "com.au", "co.jp", "com.br", "co.nz", "com.tr", "co.za"}
 )
@@ -21,7 +22,7 @@ def normalise_domain(domain_or_url: str) -> tuple[str, str]:
     raw = (domain_or_url or "").strip()
     url = raw if "://" in raw else f"https://{raw}"
     parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or len(url) > MAX_URL_LENGTH:
         raise ValueError("not a domain or http(s) URL")
     return registrable_domain(parsed.hostname), url
 

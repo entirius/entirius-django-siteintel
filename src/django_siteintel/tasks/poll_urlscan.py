@@ -14,14 +14,17 @@ from django_siteintel.sources.base import SourceError
 
 
 @shared_task(name="django_siteintel.poll_urlscan", queue=QUEUE_DEFAULT, acks_late=True)
-def poll_urlscan(report_id: int, uuid: str, deadline_iso: str) -> None:
+def poll_urlscan(report_id: int, uuid: str, deadline_iso: str, run_id: str) -> None:
     """One poll; re-dispatched with a countdown while the result is not ready — never sleeps (S-04)."""
     report = Report.objects.select_related("audit").get(pk=report_id)
+    if str(report.audit.run_id) != run_id:
+        return  # a rerun replaced this run: a stale result must not complete the reset report
     try:
         finished = report_service.poll(report, uuid, datetime.fromisoformat(deadline_iso))
     except SourceError as error:
         report_service.fail(report, error)
         return
     if not finished:
-        countdown = siteintel_settings.value("SITEINTEL_URLSCAN_POLL_INTERVAL_S")
-        poll_urlscan.apply_async((report_id, uuid, deadline_iso), countdown=countdown)
+        poll_urlscan.apply_async(
+            (report_id, uuid, deadline_iso, run_id), countdown=siteintel_settings.poll_interval_s()
+        )

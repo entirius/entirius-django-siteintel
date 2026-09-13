@@ -7,6 +7,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.urls import clear_url_caches
 
+from django_siteintel.enums import AuditStatus
 from django_siteintel.models import Audit, ExternalApiKey
 from django_siteintel.services import audit_service
 from tests.conftest import CHANNEL_IDX, DOMAIN, api_url
@@ -106,3 +107,23 @@ def test_run_now_endpoint_absent_outside_development(admin_api, recordings, sett
         settings.ENVIRONMENT = "development"
         importlib.reload(urls)
         clear_url_caches()
+
+
+def test_S09_rerun_running_audit_409(admin_api, recordings, monkeypatch):
+    monkeypatch.setattr("django_siteintel.tasks.run_audit.delay", lambda audit_id: None)
+    audit_id = _create(admin_api).json()["id"]
+    Audit.objects.filter(pk=audit_id).update(status=AuditStatus.RUNNING)
+
+    response = admin_api.post(api_url(f"audits/{audit_id}/rerun/"), {}, format="json")
+
+    assert response.status_code == 409
+    assert {"error", "message", "debug_id"} <= set(response.json())
+    assert Audit.objects.get(pk=audit_id).status == AuditStatus.RUNNING
+
+
+def test_long_domain_without_scheme_is_400(admin_api, recordings, monkeypatch):
+    monkeypatch.setattr("django_siteintel.tasks.run_audit.delay", lambda audit_id: None)
+    at_limit = "a.test/" + "x" * (2048 - len("https://a.test/"))  # 2040 chars, 2048 once the scheme is added
+
+    assert _create(admin_api, at_limit).status_code == 201
+    assert _create(admin_api, at_limit + "x").status_code == 400

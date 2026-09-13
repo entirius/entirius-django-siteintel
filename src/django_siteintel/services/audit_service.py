@@ -4,13 +4,21 @@
 
 """The public API of the module: request, rerun, expire and (development) run an audit synchronously."""
 
+import uuid
 from datetime import datetime, timedelta
 
 from django.db import transaction
 from django.utils import timezone
 
 from django_siteintel import settings as siteintel_settings
-from django_siteintel.enums import REUSABLE_AUDIT_STATUSES, SUCCEEDED_REPORT_STATUSES, AuditStatus, ReportStatus
+from django_siteintel.enums import (
+    FINISHED_REPORT_STATUSES,
+    REUSABLE_AUDIT_STATUSES,
+    SUCCEEDED_REPORT_STATUSES,
+    AuditStatus,
+    ErrorCode,
+    ReportStatus,
+)
 from django_siteintel.models import Audit, Report
 from django_siteintel.services import report_service
 from django_siteintel.signals import report_ready
@@ -22,7 +30,7 @@ from django_siteintel.utils.domains import normalise_domain
 def request_audit(*, domain_or_url: str, channel_idx: str, requested_by: str) -> Audit:
     """The valid audit of the domain (S-01, `report_ready` sent at once), else a new pending one with a run queued."""
     domain, url = normalise_domain(domain_or_url)
-    reusable = find_valid_audit(domain)
+    reusable = find_valid_audit(domain, channel_idx)
     if reusable is not None:
         succeeded = list(reusable.reports.filter(status__in=SUCCEEDED_REPORT_STATUSES).values_list("source", flat=True))
         report_ready.send(sender=Audit, audit=reusable, succeeded_sources=sorted(succeeded))
@@ -36,20 +44,32 @@ def request_audit(*, domain_or_url: str, channel_idx: str, requested_by: str) ->
     return audit
 
 
-def find_valid_audit(domain: str) -> Audit | None:
-    valid = Audit.objects.filter(domain=domain, status__in=REUSABLE_AUDIT_STATUSES, expires_at__gt=timezone.now())
+def find_valid_audit(domain: str, channel_idx: str) -> Audit | None:
+    """Reuse is channel-scoped: another channel's audit of the same domain is never returned."""
+    valid = Audit.objects.filter(
+        domain=domain, channel_idx=channel_idx, status__in=REUSABLE_AUDIT_STATUSES, expires_at__gt=timezone.now()
+    )
     return valid.order_by("-created_at").first()
 
 
+class AuditRunningError(Exception):
+    """A rerun was requested while the audit's current run is still in progress."""
+
+
 def rerun_audit(*, audit: Audit, requested_by: str) -> Audit:
-    """Same audit row, reports reset to pending, expiry extended, run queued (S-09)."""
+    """Same audit row, reports reset to pending, expiry extended, a new run queued (S-09); refused while running."""
     with transaction.atomic():
+        audit.status, audit.requested_by, audit.expires_at = AuditStatus.PENDING, requested_by, _expiry()
+        audit.run_id, audit.modified_at = uuid.uuid4(), timezone.now()
+        fields = {
+            name: getattr(audit, name) for name in ("status", "requested_by", "expires_at", "run_id", "modified_at")
+        }
+        if not Audit.objects.filter(pk=audit.pk).exclude(status=AuditStatus.RUNNING).update(**fields):
+            raise AuditRunningError(str(audit.pk))
         audit.reports.update(
             status=ReportStatus.PENDING, raw={}, processed={}, retry_count=0, duration_s=None, error_code="",
             error_detail="", modified_at=timezone.now(),
         )  # fmt: skip
-        audit.status, audit.requested_by, audit.expires_at = AuditStatus.PENDING, requested_by, _expiry()
-        audit.save(update_fields=["status", "requested_by", "expires_at", "modified_at"])
         _dispatch_run(audit)
     return audit
 
@@ -58,6 +78,23 @@ def expire_audits(now: datetime | None = None) -> int:
     """Valid audits past `expires_at` become `expired`; rows and reports are kept as history (S-02)."""
     due = Audit.objects.filter(status__in=REUSABLE_AUDIT_STATUSES, expires_at__lte=now or timezone.now())
     return due.update(status=AuditStatus.EXPIRED, modified_at=timezone.now())
+
+
+def fail_stuck_audits(now: datetime | None = None) -> int:
+    """Audits `running` longer than `SITEINTEL_AUDIT_STUCK_MINUTES` fail, with their unfinished reports."""
+    now = now or timezone.now()
+    cutoff = now - timedelta(minutes=siteintel_settings.value("SITEINTEL_AUDIT_STUCK_MINUTES"))
+    with transaction.atomic():
+        stuck = Audit.objects.select_for_update().filter(status=AuditStatus.RUNNING, modified_at__lt=cutoff)
+        audit_ids = list(stuck.values_list("pk", flat=True))
+        unfinished = Report.objects.filter(audit_id__in=audit_ids).exclude(status__in=FINISHED_REPORT_STATUSES)
+        unfinished.update(
+            status=ReportStatus.FAILED,
+            error_code=ErrorCode.TIMEOUT,
+            error_detail="audit stuck running",
+            modified_at=now,
+        )
+        return Audit.objects.filter(pk__in=audit_ids).update(status=AuditStatus.FAILED, modified_at=now)
 
 
 def run_now(audit: Audit) -> Audit:

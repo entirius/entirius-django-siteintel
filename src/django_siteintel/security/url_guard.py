@@ -74,7 +74,9 @@ def assert_safe_url(url: str, allowed_hosts: Iterable[str] = ()) -> None:
         raise ValueError(f"internal host blocked: {parsed.hostname}")
 
 
-def safe_get(url: str, timeout: float, cap: int, allowed_hosts: Iterable[str] = ()) -> Fetched:
+def safe_get(
+    url: str, timeout: float, cap: int, allowed_hosts: Iterable[str] = (), headers: dict | None = None
+) -> Fetched:
     """GET with the host re-validated on every redirect hop and the body streamed up to `cap` bytes.
 
     Redirects are never auto-followed: `allow_redirects=True` would connect to each hop before
@@ -83,7 +85,10 @@ def safe_get(url: str, timeout: float, cap: int, allowed_hosts: Iterable[str] = 
     current_url = url
     for hop in range(MAX_REDIRECTS + 1):
         assert_safe_url(current_url, allowed_hosts=allowed_hosts)
-        response = requests.get(current_url, timeout=timeout, stream=True, allow_redirects=False)
+        same_host = urlparse(current_url).hostname == urlparse(url).hostname  # headers never follow to another host
+        response = requests.get(
+            current_url, headers=headers if same_host else None, timeout=timeout, stream=True, allow_redirects=False
+        )
         if response.status_code in _REDIRECT_STATUS_CODES:
             current_url = urljoin(current_url, _location(response))
             continue

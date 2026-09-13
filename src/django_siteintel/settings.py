@@ -4,7 +4,11 @@
 
 """Module settings — read at call time so host settings and override_settings always win. Defaults live here."""
 
+import logging
+
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 QUEUE_DEFAULT = "siteintel_default"
 PSI_PUBLIC_BASE_URL = "https://www.googleapis.com/pagespeedonline/v5"
@@ -20,12 +24,31 @@ _DEFAULTS: dict[str, object] = {
     "SITEINTEL_URLSCAN_POLL_BUDGET_S": 60,
     "SITEINTEL_URLSCAN_POLL_INTERVAL_S": 10,
     "SITEINTEL_PROCESSED_MAX_BYTES": 64 * 1024,
+    "SITEINTEL_AUDIT_STUCK_MINUTES": 30,
 }
 
 
 def value(name: str):
     """Host setting `name`, else its module default."""
     return getattr(settings, name, _DEFAULTS[name])
+
+
+def poll_interval_s() -> int:
+    """Urlscan poll interval, at least 1 s — 0 would re-queue the poll and finish tasks without a pause."""
+    return _at_least("SITEINTEL_URLSCAN_POLL_INTERVAL_S", 1)
+
+
+def poll_budget_s() -> int:
+    """Urlscan poll budget, never shorter than one poll interval."""
+    return _at_least("SITEINTEL_URLSCAN_POLL_BUDGET_S", poll_interval_s())
+
+
+def _at_least(name: str, minimum: int) -> int:
+    configured = value(name)
+    if configured >= minimum:
+        return configured
+    logger.warning("%s=%s is below %s; using %s", name, configured, minimum, minimum)
+    return minimum
 
 
 def block_private_hosts() -> bool:

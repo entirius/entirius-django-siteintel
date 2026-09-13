@@ -11,8 +11,8 @@ from django_siteintel.enums import AuditStatus, ErrorCode, ReportStatus
 from django_siteintel.models import Audit, Report
 from django_siteintel.services import audit_service
 from django_siteintel.signals import report_ready
-from django_siteintel.tasks import poll_urlscan, run_audit, run_source
-from tests.conftest import CHANNEL_IDX, DOMAIN, PSI
+from django_siteintel.tasks import finish_audit, poll_urlscan, run_audit, run_source, sweep_stuck_audits
+from tests.conftest import CHANNEL_IDX, DOMAIN, GOOD_HTML, PSI, URLSCAN, urlscan_result
 from tests.fake_http import FakeResponse
 
 
@@ -64,14 +64,14 @@ def test_S04_urlscan_poll_deadline_fails_timeout_no_sleep(db, http, monkeypatch)
         audit=audit, source="urlscan", status=ReportStatus.RUNNING, raw={"submit": {"uuid": "u"}}
     )
     other = Report.objects.create(audit=audit, source="heuristic", status=ReportStatus.COMPLETED)
-    dispatched = []
+    dispatched, run_id = [], str(audit.run_id)
     monkeypatch.setattr(poll_urlscan, "apply_async", lambda args, countdown: dispatched.append((args, countdown)))
 
     future = (timezone.now() + timedelta(seconds=60)).isoformat()
-    poll_urlscan(report.pk, "u", future)  # result 404, before the deadline → re-dispatched with a countdown
-    assert dispatched == [((report.pk, "u", future), 10)]
+    poll_urlscan(report.pk, "u", future, run_id)  # result 404, before the deadline → re-dispatched with a countdown
+    assert dispatched == [((report.pk, "u", future, run_id), 10)]
 
-    poll_urlscan(report.pk, "u", (timezone.now() - timedelta(seconds=1)).isoformat())
+    poll_urlscan(report.pk, "u", (timezone.now() - timedelta(seconds=1)).isoformat(), run_id)
     report.refresh_from_db()
     assert (report.status, report.error_code) == (ReportStatus.FAILED, ErrorCode.TIMEOUT)
     assert len(dispatched) == 1
@@ -110,3 +110,77 @@ def test_unexpected_payload_shape_fails_invalid_instead_of_raising(db, recording
         "lighthouse: AttributeError",
     )
     assert audit.status == AuditStatus.PARTIALLY_COMPLETED
+
+
+def test_sweep_stuck_audits_task_name_and_queue():
+    assert (sweep_stuck_audits.name, sweep_stuck_audits.queue) == (
+        "django_siteintel.sweep_stuck_audits",
+        "siteintel_default",
+    )
+
+
+def test_run_source_unexpected_error_fails_report(db, recordings, monkeypatch):
+    audit = _audit()
+
+    def explode(report):
+        raise RuntimeError("boom with details that must not be stored")
+
+    monkeypatch.setattr("django_siteintel.services.report_service.run", explode)
+    run_source(str(audit.pk), "heuristic")  # returns normally: the chord still reaches finish_audit
+
+    report = Report.objects.get(audit=audit, source="heuristic")
+    assert (report.status, report.error_code, report.error_detail) == ("failed", "internal", "RuntimeError")
+
+
+def test_nul_characters_stripped_before_save(db, recordings):
+    result = urlscan_result()
+    result["page"]["title"] = "Sh\x00op"
+    recordings.add(f"{URLSCAN}/{DOMAIN}.result.json", FakeResponse(200, {**result, "con\x00sole": ["x\x00"]}))
+    recordings.add(f"https://{DOMAIN}", FakeResponse(200, GOOD_HTML.replace(b"<title>Good", b"<title>Go\x00od")))
+
+    audit = audit_service.run_now(_audit())
+
+    urlscan = Report.objects.get(audit=audit, source="urlscan")
+    assert audit.status == AuditStatus.COMPLETED
+    assert urlscan.raw["result"]["page"]["title"] == "Shop" and urlscan.raw["result"]["console"] == ["x"]
+    assert "\x00" not in str(Report.objects.get(audit=audit, source="heuristic").processed)
+
+
+def test_stale_poll_ignored_after_rerun(db, recordings, monkeypatch):
+    audit = audit_service.run_now(_audit())
+    old_run_id = str(audit.run_id)
+    monkeypatch.setattr("django_siteintel.tasks.run_audit.delay", lambda audit_id: None)
+    audit_service.rerun_audit(audit=audit, requested_by="cms:admin")
+    Audit.objects.filter(pk=audit.pk).update(status=AuditStatus.RUNNING)  # the new run has started
+    dispatched = []
+    monkeypatch.setattr(finish_audit, "apply_async", lambda args, countdown: dispatched.append(args))
+    calls_before = len(recordings.calls)
+
+    urlscan = Report.objects.get(audit=audit, source="urlscan")
+    poll_urlscan(urlscan.pk, "u-1", (timezone.now() + timedelta(seconds=60)).isoformat(), old_run_id)
+    finish_audit(str(audit.pk), old_run_id, attempt=100)  # the old loop past its budget would fail every report
+
+    assert len(recordings.calls) == calls_before and dispatched == []
+    assert set(Report.objects.filter(audit=audit).values_list("status", flat=True)) == {ReportStatus.PENDING}
+    assert Audit.objects.get(pk=audit.pk).status == AuditStatus.RUNNING
+
+
+def test_zero_poll_interval_does_not_loop(db, recordings, monkeypatch, settings, caplog):
+    settings.SITEINTEL_URLSCAN_POLL_INTERVAL_S = 0
+    settings.SITEINTEL_URLSCAN_POLL_BUDGET_S = 0
+    audit = _audit()
+    Audit.objects.filter(pk=audit.pk).update(status=AuditStatus.RUNNING)
+    Report.objects.filter(audit=audit).update(status=ReportStatus.RUNNING)
+    queue, countdowns = [(str(audit.pk), str(audit.run_id), 0)], []
+
+    def requeue(args, countdown):
+        countdowns.append(countdown)
+        queue.append(args)
+
+    monkeypatch.setattr(finish_audit, "apply_async", requeue)
+    while queue and len(countdowns) < 100:
+        finish_audit(*queue.pop())
+
+    assert countdowns == [1, 1, 1]
+    assert Audit.objects.get(pk=audit.pk).status == AuditStatus.FAILED
+    assert "SITEINTEL_URLSCAN_POLL_INTERVAL_S=0" in caplog.text

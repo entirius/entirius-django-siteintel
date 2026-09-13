@@ -36,3 +36,4 @@ class ErrorCode(models.TextChoices):
     TRUNCATED = "truncated", "Body over the byte cap"
     INVALID = "invalid", "Invalid or oversized payload"
     RECORDING_MISSING = "recording_missing", "No recording for the domain"
+    INTERNAL = "internal", "Unexpected error"

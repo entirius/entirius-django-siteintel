@@ -36,18 +36,20 @@ class FakeResponse:
 
 
 class FakeHttp:
-    """Routes by URL prefix; unknown URLs answer 404. `calls` records every URL requested."""
+    """Routes by URL prefix; unknown URLs answer 404. `calls` / `headers` record every request's URL and headers."""
 
     def __init__(self):
         self.routes: dict[str, list[FakeResponse]] = {}
         self.calls: list[str] = []
+        self.headers: list[dict] = []
 
     def add(self, url_prefix: str, *responses: FakeResponse) -> None:
         """Responses are served in order; the last one repeats."""
         self.routes[url_prefix] = list(responses)
 
-    def request(self, url: str, **_kwargs) -> FakeResponse:
+    def request(self, url: str, **kwargs) -> FakeResponse:
         self.calls.append(url)
+        self.headers.append(kwargs.get("headers") or {})
         for prefix, responses in self.routes.items():
             if url.startswith(prefix):
                 return responses.pop(0) if len(responses) > 1 else responses[0]

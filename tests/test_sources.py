@@ -109,7 +109,7 @@ def test_lighthouse_no_recording_at_all(http):
     assert caught.value.code == ErrorCode.RECORDING_MISSING
 
 
-def test_lighthouse_live_mode_key_never_in_error_detail(http, db, settings):
+def test_lighthouse_live_mode_key_in_header_never_in_url_or_error_detail(http, db, settings):
     settings.SITEINTEL_PSI_BASE_URL = "https://www.googleapis.com/pagespeedonline/v5"
     settings.SITEINTEL_ALLOWED_HOSTS = ["www.googleapis.com"]
     ExternalApiKey.objects.create(source="lighthouse", key="TEST-secret-key")
@@ -119,9 +119,9 @@ def test_lighthouse_live_mode_key_never_in_error_detail(http, db, settings):
         LighthouseSource().fetch_raw(_audit())
 
     assert caught.value.code == ErrorCode.UPSTREAM
-    assert (
-        "key" not in str(caught.value) and "strategy=mobile" in http.calls[0] and "key=TEST-secret-key" in http.calls[0]
-    )
+    assert "key" not in str(caught.value) and "strategy=mobile" in http.calls[0]
+    assert all("key=" not in url for url in http.calls)
+    assert http.headers[0] == {"X-Goog-Api-Key": "TEST-secret-key"}
 
 
 def test_urlscan_live_submit_and_result_404_not_ready(http, db, settings):

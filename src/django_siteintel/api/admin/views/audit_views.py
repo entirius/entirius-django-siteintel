@@ -5,7 +5,7 @@
 """Admin API v2 — audits of a channel: list, detail, request (reuses a valid audit), rerun."""
 
 from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -20,6 +20,12 @@ from django_siteintel.utils.domains import normalise_domain
 
 _TAGS = ["Siteintel"]
 INVALID_DOMAIN = "Not a domain or http(s) URL."
+
+
+class AuditRunning(APIException):
+    status_code = 409
+    default_detail = "The audit is still running; rerun it once it has finished."
+    default_code = "audit_running"
 
 
 class AuditPagination(PageNumberPagination):
@@ -93,12 +99,15 @@ class AuditRerunView(AdminView):
         operation_id="siteintel_audits_rerun",
         summary="Re-run an audit: same id, reports reset and fetched again",
         request=AuditRerunRequest,
-        responses={202: AuditResponse, **ERROR_RESPONSES},
+        responses={202: AuditResponse, 409: None, **ERROR_RESPONSES},
     )
     def post(self, request: Request, channel_idx: str, audit_id) -> Response:
         body = parse(AuditRerunRequest, request.data or {})
         requested_by = body.requested_by or f"admin:{request.user.get_username()}"
-        audit = audit_service.rerun_audit(audit=self.audit(channel_idx, audit_id), requested_by=requested_by)
+        try:
+            audit = audit_service.rerun_audit(audit=self.audit(channel_idx, audit_id), requested_by=requested_by)
+        except audit_service.AuditRunningError:
+            raise AuditRunning() from None
         return Response(AuditResponse.model_validate(audit).model_dump(mode="json"), status=202)
 
 

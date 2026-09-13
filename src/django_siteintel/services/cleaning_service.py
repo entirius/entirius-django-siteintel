@@ -27,6 +27,15 @@ def clean_snapshot(snapshot: dict) -> dict:
     raise SourceError(ErrorCode.INVALID, "processed snapshot too large")
 
 
+def strip_nul(value):
+    """Copy of a JSON value without NUL characters in any string or key — Postgres jsonb rejects U+0000."""
+    if isinstance(value, dict):
+        return {strip_nul(k): strip_nul(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [strip_nul(v) for v in value]
+    return value.replace("\x00", "") if isinstance(value, str) else value
+
+
 def _clean(value, depth: int, list_cap: int):
     if isinstance(value, dict | list) and depth >= MAX_DEPTH:
         return _DROP

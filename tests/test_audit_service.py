@@ -95,3 +95,45 @@ def test_S09_rerun_resets_reports_same_audit_id(
     assert list(rerun.reports.values_list("status", "raw", "processed", "retry_count")) == [("pending", {}, {}, 0)] * 3
     assert queued == [str(audit.pk)] and len(signals) == 1
     assert audit_service.run_now(rerun).status == AuditStatus.COMPLETED and len(signals) == 2
+
+
+def test_S01_reuse_is_scoped_to_channel(db, recordings, signals, monkeypatch):
+    first = audit_service.run_now(_request())
+    monkeypatch.setattr("django_siteintel.tasks.run_audit.delay", lambda audit_id: None)
+
+    other = audit_service.request_audit(
+        domain_or_url=DOMAIN, channel_idx="other-channel", requested_by="leads.Company:2"
+    )
+
+    assert other.pk != first.pk
+    assert (other.channel_idx, other.requested_by, other.status) == ("other-channel", "leads.Company:2", "pending")
+    assert len(signals) == 1
+
+
+def test_S09_rerun_running_audit_is_refused(db, recordings):
+    audit = _request()
+    Audit.objects.filter(pk=audit.pk).update(status=AuditStatus.RUNNING)
+    run_id = Audit.objects.get(pk=audit.pk).run_id
+
+    with pytest.raises(audit_service.AuditRunningError):
+        audit_service.rerun_audit(audit=audit, requested_by="cms:admin")
+
+    assert Audit.objects.get(pk=audit.pk).run_id == run_id
+
+
+def test_sweeper_fails_stuck_audits(db, recordings, settings):
+    settings.SITEINTEL_AUDIT_STUCK_MINUTES = 30
+    stuck, fresh = _request(), _request("other-shop.test")
+    Audit.objects.filter(pk__in=[stuck.pk, fresh.pk]).update(status=AuditStatus.RUNNING)
+    Audit.objects.filter(pk=stuck.pk).update(modified_at=timezone.now() - timedelta(minutes=31))
+    Report.objects.filter(audit=stuck, source="heuristic").update(status=ReportStatus.COMPLETED)
+
+    assert audit_service.fail_stuck_audits() == 1
+
+    assert Audit.objects.get(pk=stuck.pk).status == AuditStatus.FAILED
+    assert Audit.objects.get(pk=fresh.pk).status == AuditStatus.RUNNING
+    assert sorted(stuck.reports.values_list("source", "status", "error_code")) == [
+        ("heuristic", "completed", ""),
+        ("lighthouse", "failed", "timeout"),
+        ("urlscan", "failed", "timeout"),
+    ]

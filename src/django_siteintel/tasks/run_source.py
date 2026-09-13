@@ -18,8 +18,9 @@ MAX_RETRIES = 3
 BACKOFF_MAX_S = 600
 
 
-# Retries only for `upstream` (S-03); `ssrf`, `timeout`, `invalid` fail at once. The task never raises past the
-# retries — an exception would break the chord and `finish_audit` would never run.
+# Retries only for `upstream` (S-03); `ssrf`, `timeout`, `invalid` fail at once; any other exception fails the
+# report as `internal`. The task never raises past the retries — an exception would break the chord and
+# `finish_audit` would never run.
 @shared_task(
     bind=True, name="django_siteintel.run_source", queue=QUEUE_DEFAULT, acks_late=True, max_retries=MAX_RETRIES
 )
@@ -35,9 +36,11 @@ def run_source(self, audit_id: str, source: str) -> None:
             return
         report_service.note_retry(report, error, retries + 1)
         raise self.retry(countdown=get_exponential_backoff_interval(1, retries, BACKOFF_MAX_S, True)) from None
+    except Exception as exc:  # any failure must end the report, never the chord
+        report_service.fail(report, SourceError(ErrorCode.INTERNAL, type(exc).__name__))
 
 
 def _schedule_poll(report: Report) -> None:
     deadline = timezone.now() + report_service.poll_budget()
-    args = (report.pk, report.raw["submit"]["uuid"], deadline.isoformat())
-    poll_urlscan.apply_async(args, countdown=siteintel_settings.value("SITEINTEL_URLSCAN_POLL_INTERVAL_S"))
+    args = (report.pk, report.raw["submit"]["uuid"], deadline.isoformat(), str(report.audit.run_id))
+    poll_urlscan.apply_async(args, countdown=siteintel_settings.poll_interval_s())

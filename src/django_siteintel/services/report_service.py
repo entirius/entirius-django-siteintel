@@ -18,7 +18,7 @@ from django_siteintel.enums import (
     ReportStatus,
 )
 from django_siteintel.models import Audit, Report
-from django_siteintel.services.cleaning_service import clean_snapshot
+from django_siteintel.services.cleaning_service import clean_snapshot, strip_nul
 from django_siteintel.signals import report_ready
 from django_siteintel.sources.base import SourceError
 from django_siteintel.sources.registry import get_source
@@ -89,7 +89,7 @@ def finish(audit_id) -> bool:
 
 
 def poll_budget() -> timedelta:
-    return timedelta(seconds=siteintel_settings.value("SITEINTEL_URLSCAN_POLL_BUDGET_S"))
+    return timedelta(seconds=siteintel_settings.poll_budget_s())
 
 
 def _audit_status(succeeded: int, total: int) -> str:
@@ -101,6 +101,9 @@ def _audit_status(succeeded: int, total: int) -> str:
 def _save(report: Report, **fields) -> bool:
     """Write while the report is unfinished; False when a concurrent run already finished it (never reopened)."""
     fields["modified_at"] = timezone.now()
+    for name in ("raw", "processed"):
+        if name in fields:
+            fields[name] = strip_nul(fields[name])
     for name, value in fields.items():
         setattr(report, name, value)
     unfinished = Report.objects.filter(pk=report.pk).exclude(status__in=FINISHED_REPORT_STATUSES)

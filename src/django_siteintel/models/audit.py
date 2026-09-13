@@ -20,6 +20,8 @@ class Audit(BaseModel):
     status = models.CharField(max_length=32, choices=AuditStatus.choices, default=AuditStatus.PENDING)
     requested_by = models.CharField(max_length=200)
     expires_at = models.DateTimeField()
+    # A new value per run: tasks of a previous run carry the old one and no-op.
+    run_id = models.UUIDField(default=uuid.uuid4, editable=False)
 
     class Meta:
         indexes = [models.Index(fields=["domain", "status"], name="siteintel_audit_domain_status")]

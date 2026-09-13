@@ -49,7 +49,7 @@ class LighthouseSource(SourceFetcher):
     def _fetch_strategy(self, audit: Audit, strategy: str) -> dict | None:
         url = _url(audit, strategy)
         try:
-            fetched = safe_get(url, **fetch_options())
+            fetched = safe_get(url, headers=_headers(), **fetch_options())
         except (ValueError, requests.RequestException) as exc:
             if _recording() and is_not_found(exc):
                 return None
@@ -69,10 +69,13 @@ def _url(audit: Audit, strategy: str) -> str:
     if _recording():
         return f"{_base()}/{audit.domain}.{strategy}.json"
     params = {"url": audit.url, "strategy": strategy, "category": "performance"}
-    key = api_key(LighthouseSource.name)
-    if key:
-        params["key"] = key
     return f"{_base()}/runPagespeed?{urlencode(params)}"
+
+
+def _headers() -> dict:
+    """The PSI key travels in a header: a `key=` query parameter would land in urllib3's DEBUG request log."""
+    key = "" if _recording() else api_key(LighthouseSource.name)
+    return {"X-Goog-Api-Key": key} if key else {}
 
 
 def _summary(run: dict) -> dict:
