@@ -27,7 +27,8 @@ from django_siteintel.sources.registry import get_source
 def run(report: Report) -> bool:
     """Fetch the source; True when the report is finished, False when a polling source awaits its result."""
     started = timezone.now()
-    _save(report, status=ReportStatus.RUNNING)
+    if not _save(report, status=ReportStatus.RUNNING):
+        return True  # finished by a concurrent run (run-now next to the worker)
     source = get_source(report.source)
     raw = source.fetch_raw(report.audit)
     if source.polls:
@@ -97,7 +98,10 @@ def _audit_status(succeeded: int, total: int) -> str:
     return AuditStatus.PARTIALLY_COMPLETED if succeeded else AuditStatus.FAILED
 
 
-def _save(report: Report, **fields) -> None:
+def _save(report: Report, **fields) -> bool:
+    """Write while the report is unfinished; False when a concurrent run already finished it (never reopened)."""
+    fields["modified_at"] = timezone.now()
     for name, value in fields.items():
         setattr(report, name, value)
-    report.save(update_fields=[*fields, "modified_at"])
+    unfinished = Report.objects.filter(pk=report.pk).exclude(status__in=FINISHED_REPORT_STATUSES)
+    return unfinished.update(**fields) == 1

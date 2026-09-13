@@ -14,7 +14,9 @@ from django_siteintel.tasks.run_source import run_source
 
 @shared_task(name="django_siteintel.run_audit", queue=QUEUE_DEFAULT, acks_late=True)
 def run_audit(audit_id: str) -> None:
-    """Mark the audit running and fan out one `run_source` per report; `finish_audit` closes the run."""
-    Audit.objects.filter(pk=audit_id).update(status=AuditStatus.RUNNING, modified_at=timezone.now())
+    """Claim the pending audit and fan out one `run_source` per report; `finish_audit` closes the run."""
+    claimed = Audit.objects.filter(pk=audit_id, status=AuditStatus.PENDING)
+    if not claimed.update(status=AuditStatus.RUNNING, modified_at=timezone.now()):
+        return  # already run elsewhere (development run-now)
     sources = Audit.objects.get(pk=audit_id).reports.values_list("source", flat=True)
     chord(run_source.si(audit_id, source) for source in sources)(finish_audit.si(audit_id))

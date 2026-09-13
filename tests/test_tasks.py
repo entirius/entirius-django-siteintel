@@ -1,6 +1,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
+import sys
 from datetime import timedelta
 
 import pytest
@@ -10,7 +11,7 @@ from django_siteintel.enums import AuditStatus, ErrorCode, ReportStatus
 from django_siteintel.models import Audit, Report
 from django_siteintel.services import audit_service
 from django_siteintel.signals import report_ready
-from django_siteintel.tasks import poll_urlscan, run_audit
+from django_siteintel.tasks import poll_urlscan, run_audit, run_source
 from tests.conftest import CHANNEL_IDX, DOMAIN, PSI
 from tests.fake_http import FakeResponse
 
@@ -79,6 +80,21 @@ def test_S04_urlscan_poll_deadline_fails_timeout_no_sleep(db, http, monkeypatch)
 
 def test_run_audit_task_name_and_queue():
     assert (run_audit.name, run_audit.queue) == ("django_siteintel.run_audit", "siteintel_default")
+
+
+def test_late_worker_run_never_reopens_an_audit_finished_by_run_now(db, recordings, monkeypatch):
+    audit = audit_service.run_now(_audit())  # `db` never fires on_commit: the worker run arrives only below
+    chords = []
+    monkeypatch.setattr(sys.modules["django_siteintel.tasks.run_audit"], "chord", chords.append)
+    calls_before = len(recordings.calls)
+
+    run_audit(str(audit.pk))
+    for source in ("heuristic", "lighthouse", "urlscan"):
+        run_source(str(audit.pk), source)
+
+    assert chords == [] and len(recordings.calls) == calls_before
+    assert Audit.objects.get(pk=audit.pk).status == AuditStatus.COMPLETED
+    assert set(Report.objects.filter(audit=audit).values_list("status", flat=True)) == {ReportStatus.COMPLETED}
 
 
 def test_unexpected_payload_shape_fails_invalid_instead_of_raising(db, recordings):
