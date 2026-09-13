@@ -46,7 +46,9 @@ Layers: API → services → sources → models. No leads, no companies: consume
   → `finish_audit` (sends `report_ready(audit, succeeded_sources)` once per run); `poll_urlscan` re-dispatches with a
   countdown until `SITEINTEL_URLSCAN_POLL_BUDGET_S`; `expire_audits`; `sweep_stuck_audits`. Never `time.sleep` (a test
   greps `src/`). Any non-`SourceError` exception in `run_source` fails the report `internal` (detail = class name) so
-  the chord completes. `poll_urlscan` / `finish_audit` carry the audit's `run_id` and no-op once a rerun replaced it.
+  the chord completes. `run_source(audit_id, source, run_id)` / `poll_urlscan` / `finish_audit` carry the audit's
+  `run_id` and no-op once a rerun replaced it (`run_source` without `run_id` — a pre-change message — is stale too).
+  The sweeper fails each audit under its row lock and sends `report_ready` once, after the commit.
   Poll interval / budget are clamped at read time (`interval >= 1`, `budget >= interval`, WARNING when clamped).
   NUL characters are stripped from `raw` / `processed` before save (Postgres jsonb rejects U+0000).
 - The PSI key travels in the `X-Goog-Api-Key` header, never in the URL; `safe_get` drops headers on a cross-host redirect.
