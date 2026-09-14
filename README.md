@@ -8,4 +8,4 @@ Domain intelligence for the Volkanos platform: Lighthouse, URLScan and heuristic
 pip install entirius-django-siteintel
 ```
 
-Status: scaffold (0.1.0). See `AGENTS.md`.
+Status: 0.1.0 (unreleased). See `AGENTS.md`.
