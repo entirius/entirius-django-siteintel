@@ -1,6 +1,8 @@
+# Workflow of entirius-django-siteintel (GitHub org entirius).
 name: Publish
 
 on:
+  workflow_dispatch:
   release:
     types: [published]
 
