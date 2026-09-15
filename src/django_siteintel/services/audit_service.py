@@ -7,12 +7,13 @@
 import uuid
 from datetime import datetime, timedelta
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from django_siteintel import settings as siteintel_settings
 from django_siteintel.enums import (
     FINISHED_REPORT_STATUSES,
+    IN_FLIGHT_AUDIT_STATUSES,
     REUSABLE_AUDIT_STATUSES,
     SUCCEEDED_REPORT_STATUSES,
     AuditStatus,
@@ -35,13 +36,21 @@ def request_audit(*, domain_or_url: str, channel_idx: str, requested_by: str) ->
         succeeded = list(reusable.reports.filter(status__in=SUCCEEDED_REPORT_STATUSES).values_list("source", flat=True))
         report_ready.send(sender=Audit, audit=reusable, succeeded_sources=sorted(succeeded))
         return reusable
-    with transaction.atomic():
-        audit = Audit.objects.create(
-            domain=domain, url=url, channel_idx=channel_idx, requested_by=requested_by, expires_at=_expiry()
-        )
-        Report.objects.bulk_create([Report(audit=audit, source=source) for source in list_sources()])
-        _dispatch_run(audit)
+    try:
+        with transaction.atomic():
+            audit = Audit.objects.create(
+                domain=domain, url=url, channel_idx=channel_idx, requested_by=requested_by, expires_at=_expiry()
+            )
+            Report.objects.bulk_create([Report(audit=audit, source=source) for source in list_sources()])
+            _dispatch_run(audit)
+    except IntegrityError:
+        return _find_in_flight_audit(domain, channel_idx)  # a concurrent request won the race (item 7)
     return audit
+
+
+def _find_in_flight_audit(domain: str, channel_idx: str) -> Audit:
+    in_flight = Audit.objects.filter(domain=domain, channel_idx=channel_idx, status__in=IN_FLIGHT_AUDIT_STATUSES)
+    return in_flight.order_by("-created_at").first()
 
 
 def find_valid_audit(domain: str, channel_idx: str) -> Audit | None:

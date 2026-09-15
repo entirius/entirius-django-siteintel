@@ -98,6 +98,9 @@ or poll never writes into the new run.
   **in the same channel** that is `completed` or `partially_completed` and not past `expires_at`. It fetches
   nothing and sends `report_ready` immediately with the sources that succeeded. Another channel's audit of the
   same domain is never returned.
+- **One in-flight audit per domain and channel.** A database constraint allows only one `pending`/`running`
+  `Audit` row per (`domain`, `channel_idx`). Two concurrent first requests for the same domain race to create
+  it; the loser's `IntegrityError` is caught and it returns the winner's audit instead of a duplicate.
 - **Rerun.** `rerun_audit(audit, requested_by)` keeps the audit id, resets every report to `pending` (raw,
   processed, retries and errors cleared), extends `expires_at` and queues a new run. It is refused with
   `AuditRunningError` while the audit is `running`; the caller's instance is left untouched.

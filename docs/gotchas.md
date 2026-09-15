@@ -49,8 +49,10 @@ Install-time traps (result backend, `siteintel_default` queue, beat schedules, O
 - **Reuse is per channel.** The same domain requested from two channels makes two audits and two fetches.
 - **The registrable domain is a short suffix list, not the PSL** (`utils/domains.MULTI_PART_SUFFIXES`). A
   missing multi-part suffix merges unrelated shops under one key — add it there, with a test row.
-- **Concurrent first requests for one domain can create two audits** — there is no lock around
-  `find_valid_audit` + create. Both run; the newest valid one wins later reuse.
+- **One in-flight audit per (domain, channel) is a database constraint, not an application lock.** Two
+  concurrent first requests both miss `find_valid_audit` and both call `create()`; the second raises
+  `IntegrityError`, which `request_audit` catches to return the first request's audit instead. A caller that
+  bypasses `request_audit` and calls `Audit.objects.create()` directly loses that protection.
 - **`URLField(max_length=2048)` is checked after the scheme is added** (`normalise_domain`) — a 2048-character
   domain without scheme is a 400, not a database error.
 

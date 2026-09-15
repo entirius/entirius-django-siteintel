@@ -1,9 +1,11 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
+import threading
 from datetime import timedelta
 
 import pytest
+from django.db import connection
 from django.utils import timezone
 
 from django_siteintel.enums import AuditStatus, ReportStatus
@@ -95,6 +97,31 @@ def test_S09_rerun_resets_reports_same_audit_id(
     assert list(rerun.reports.values_list("status", "raw", "processed", "retry_count")) == [("pending", {}, {}, 0)] * 3
     assert queued == [str(audit.pk)] and len(signals) == 1
     assert audit_service.run_now(rerun).status == AuditStatus.COMPLETED and len(signals) == 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_item7_concurrent_first_requests_create_one_audit(monkeypatch):
+    """Real Postgres, two threads racing `request_audit`: the unique constraint leaves one audit."""
+    monkeypatch.setattr("django_siteintel.tasks.run_audit.delay", lambda audit_id: None)
+    results: list[Audit] = []
+    barrier = threading.Barrier(2)
+
+    def create() -> None:
+        barrier.wait()
+        try:
+            results.append(_request())
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=create) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(results) == 2
+    assert results[0].pk == results[1].pk
+    assert Audit.objects.filter(domain=DOMAIN, channel_idx=CHANNEL_IDX).count() == 1
 
 
 def test_S01_reuse_is_scoped_to_channel(db, recordings, signals, monkeypatch):

@@ -29,3 +29,8 @@ report per source, reused while valid, announced by the `report_ready` signal.
   `openapi.yaml`, `erd-config.yaml`.
 - **Edge cases covered:** S-01 … S-09 in the unit suite; S-01, S-08, S-09 also in the emporium BDD feature
   `@siteintel`.
+- **Fix: `ExternalApiKey` admin change form no longer renders the stored key in plain text.** The key is a
+  write-only field (`new_key`, `PasswordInput`); leaving it blank on save keeps the stored value.
+- **Fix: one in-flight audit per (domain, channel).** A database constraint (migration `0003`) rejects a
+  second `pending`/`running` `Audit` row for the same domain and channel; `request_audit` catches the race
+  and returns the winning audit instead of creating a duplicate.
