@@ -1,0 +1,490 @@
+openapi: 3.1.0
+info:
+  title: entirius-django-siteintel Admin API v2
+  version: 0.1.0
+paths:
+  /api/siteintel/v2/admin/{channel_idx}/audits/:
+    get:
+      operationId: siteintel_audits_list
+      summary: List audits requested on the channel
+      parameters:
+      - in: path
+        name: channel_idx
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: domain
+        schema:
+          type: string
+        description: Domain or URL, matched on its registrable domain.
+      - in: query
+        name: ordering
+        schema:
+          type: string
+        description: created_at, domain or status; '-' for descending.
+      - in: query
+        name: page
+        schema:
+          type: integer
+        description: Page number.
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Only audits in this status.
+      tags:
+      - Siteintel
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditListResponse'
+          description: ''
+        '400':
+          description: No response body
+        '401':
+          description: No response body
+        '403':
+          description: No response body
+        '404':
+          description: No response body
+    post:
+      operationId: siteintel_audits_request
+      description: 201 with a new pending audit, or 200 with the valid audit of the domain (reused, no fetch).
+      summary: Request an audit of a domain
+      parameters:
+      - in: path
+        name: channel_idx
+        schema:
+          type: string
+        required: true
+      tags:
+      - Siteintel
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AuditCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AuditCreateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditResponse'
+          description: ''
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditResponse'
+          description: ''
+        '400':
+          description: No response body
+        '401':
+          description: No response body
+        '403':
+          description: No response body
+        '404':
+          description: No response body
+  /api/siteintel/v2/admin/{channel_idx}/audits/{audit_id}/:
+    get:
+      operationId: siteintel_audits_detail
+      summary: Get one audit with the processed report of every source
+      parameters:
+      - in: path
+        name: audit_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: channel_idx
+        schema:
+          type: string
+        required: true
+      tags:
+      - Siteintel
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditDetailResponse'
+          description: ''
+        '400':
+          description: No response body
+        '401':
+          description: No response body
+        '403':
+          description: No response body
+        '404':
+          description: No response body
+  /api/siteintel/v2/admin/{channel_idx}/audits/{audit_id}/rerun/:
+    post:
+      operationId: siteintel_audits_rerun
+      summary: 'Re-run an audit: same id, reports reset and fetched again'
+      parameters:
+      - in: path
+        name: audit_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: channel_idx
+        schema:
+          type: string
+        required: true
+      tags:
+      - Siteintel
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditRerunRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AuditRerunRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AuditRerunRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditResponse'
+          description: ''
+        '409':
+          description: No response body
+        '400':
+          description: No response body
+        '401':
+          description: No response body
+        '403':
+          description: No response body
+        '404':
+          description: No response body
+components:
+  schemas:
+    AuditCreateRequest:
+      additionalProperties: false
+      properties:
+        domain_or_url:
+          description: Domain or URL to audit.
+          examples:
+          - https://www.shop.example/pl
+          maxLength: 2048
+          minLength: 1
+          title: Domain Or Url
+          type: string
+        requested_by:
+          description: Subject reference of the requester.
+          examples:
+          - leads.Company:42
+          maxLength: 200
+          minLength: 1
+          title: Requested By
+          type: string
+      required:
+      - domain_or_url
+      - requested_by
+      title: AuditCreateRequest
+      type: object
+    AuditDetailResponse:
+      properties:
+        id:
+          description: Audit id.
+          examples:
+          - 6f1c1e2a-8a53-4a55-9a8f-0d6c1f7d9b10
+          format: uuid
+          title: Id
+          type: string
+        domain:
+          description: Registrable domain the audit is keyed by.
+          examples:
+          - shop.example
+          title: Domain
+          type: string
+        url:
+          description: Audited URL as requested.
+          examples:
+          - https://www.shop.example/pl
+          title: Url
+          type: string
+        channel_idx:
+          description: Channel of the first requester.
+          examples:
+          - default-europe
+          title: Channel Idx
+          type: string
+        status:
+          description: pending, running, completed, partially_completed, failed or expired.
+          examples:
+          - completed
+          title: Status
+          type: string
+        requested_by:
+          description: Subject reference of the requester.
+          examples:
+          - leads.Company:42
+          title: Requested By
+          type: string
+        expires_at:
+          description: Reused until this moment.
+          examples:
+          - '2026-12-12T12:00:00Z'
+          format: date-time
+          title: Expires At
+          type: string
+        created_at:
+          description: When the audit was requested.
+          examples:
+          - '2026-09-13T12:00:00Z'
+          format: date-time
+          title: Created At
+          type: string
+        modified_at:
+          description: Last change of the audit.
+          examples:
+          - '2026-09-13T12:00:05Z'
+          format: date-time
+          title: Modified At
+          type: string
+        reports:
+          description: One report per source.
+          examples:
+          - []
+          items:
+            $ref: '#/components/schemas/ReportResponse'
+          title: Reports
+          type: array
+      required:
+      - id
+      - domain
+      - url
+      - channel_idx
+      - status
+      - requested_by
+      - expires_at
+      - created_at
+      - modified_at
+      - reports
+      title: AuditDetailResponse
+      type: object
+    AuditListResponse:
+      properties:
+        count:
+          description: Total matching audits.
+          examples:
+          - 1
+          title: Count
+          type: integer
+        next:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Next page URL.
+          examples:
+          - null
+          title: Next
+        previous:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Previous page URL.
+          examples:
+          - null
+          title: Previous
+        results:
+          description: Audits of the page.
+          examples:
+          - []
+          items:
+            $ref: '#/components/schemas/AuditResponse'
+          title: Results
+          type: array
+      required:
+      - count
+      - next
+      - previous
+      - results
+      title: AuditListResponse
+      type: object
+    AuditRerunRequest:
+      additionalProperties: false
+      properties:
+        requested_by:
+          anyOf:
+          - maxLength: 200
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          description: Requester; the admin username when omitted.
+          examples:
+          - cms:admin
+          title: Requested By
+      title: AuditRerunRequest
+      type: object
+    AuditResponse:
+      properties:
+        id:
+          description: Audit id.
+          examples:
+          - 6f1c1e2a-8a53-4a55-9a8f-0d6c1f7d9b10
+          format: uuid
+          title: Id
+          type: string
+        domain:
+          description: Registrable domain the audit is keyed by.
+          examples:
+          - shop.example
+          title: Domain
+          type: string
+        url:
+          description: Audited URL as requested.
+          examples:
+          - https://www.shop.example/pl
+          title: Url
+          type: string
+        channel_idx:
+          description: Channel of the first requester.
+          examples:
+          - default-europe
+          title: Channel Idx
+          type: string
+        status:
+          description: pending, running, completed, partially_completed, failed or expired.
+          examples:
+          - completed
+          title: Status
+          type: string
+        requested_by:
+          description: Subject reference of the requester.
+          examples:
+          - leads.Company:42
+          title: Requested By
+          type: string
+        expires_at:
+          description: Reused until this moment.
+          examples:
+          - '2026-12-12T12:00:00Z'
+          format: date-time
+          title: Expires At
+          type: string
+        created_at:
+          description: When the audit was requested.
+          examples:
+          - '2026-09-13T12:00:00Z'
+          format: date-time
+          title: Created At
+          type: string
+        modified_at:
+          description: Last change of the audit.
+          examples:
+          - '2026-09-13T12:00:05Z'
+          format: date-time
+          title: Modified At
+          type: string
+      required:
+      - id
+      - domain
+      - url
+      - channel_idx
+      - status
+      - requested_by
+      - expires_at
+      - created_at
+      - modified_at
+      title: AuditResponse
+      type: object
+    ReportResponse:
+      properties:
+        source:
+          description: Source name (entry point).
+          examples:
+          - heuristic
+          title: Source
+          type: string
+        status:
+          description: pending, running, completed, partial or failed.
+          examples:
+          - completed
+          title: Status
+          type: string
+        processed:
+          additionalProperties: true
+          description: Cleaned snapshot, bounded in size.
+          examples:
+          - images_without_alt: 0
+          title: Processed
+          type: object
+        retry_count:
+          description: Upstream retries made.
+          examples:
+          - 0
+          title: Retry Count
+          type: integer
+        duration_s:
+          anyOf:
+          - type: number
+          - type: 'null'
+          description: Fetch-to-result seconds.
+          examples:
+          - 1.4
+          title: Duration S
+        error_code:
+          description: ssrf, timeout, upstream, truncated, invalid or recording_missing.
+          examples:
+          - ''
+          title: Error Code
+          type: string
+        error_detail:
+          description: Host and error class of the failure.
+          examples:
+          - ''
+          title: Error Detail
+          type: string
+        modified_at:
+          description: Last change of the report.
+          examples:
+          - '2026-09-13T12:00:00Z'
+          format: date-time
+          title: Modified At
+          type: string
+      required:
+      - source
+      - status
+      - processed
+      - retry_count
+      - duration_s
+      - error_code
+      - error_detail
+      - modified_at
+      title: ReportResponse
+      type: object
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+tags:
+- name: Siteintel
