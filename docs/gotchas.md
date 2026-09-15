@@ -25,7 +25,7 @@ Install-time traps (result backend, `siteintel_default` queue, beat schedules, O
 - **Every polling source is polled through `poll_urlscan`** and must return `{"submit": {"uuid": ...}}` from
   `fetch_raw` — the runner (`run_source._schedule_poll`, `audit_service._run_inline`) reads that key.
 - **The stuck-audit cutoff reads `Audit.modified_at`**, which a report write does not touch. An audit is
-  "stuck" by time since it was claimed, not since its last progress.
+  "stuck" by time since it was created, rerun or claimed, not since its last progress.
 
 ## Sources and the guard
 
@@ -52,7 +52,8 @@ Install-time traps (result backend, `siteintel_default` queue, beat schedules, O
 - **One in-flight audit per (domain, channel) is a database constraint, not an application lock.** Two
   concurrent first requests both miss `find_valid_audit` and both call `create()`; the second raises
   `IntegrityError`, which `request_audit` catches to return the first request's audit instead. A caller that
-  bypasses `request_audit` and calls `Audit.objects.create()` directly loses that protection.
+  bypasses `request_audit` and calls `Audit.objects.create()` directly loses that protection. A rerun that
+  would put a second audit in flight is refused (`AuditInFlightError`, API 409 `audit_in_flight`).
 - **`URLField(max_length=2048)` is checked after the scheme is added** (`normalise_domain`) — a 2048-character
   domain without scheme is a 400, not a database error.
 

@@ -17,7 +17,7 @@ report per source, reused while valid, announced by the `report_ready` signal.
 - **Run lifecycle** on queue `siteintel_default`: `run_audit` → chord of `run_source` → `finish_audit`,
   `report_ready` once per run. Only `upstream` errors retry (3×, backoff); any unexpected exception fails the
   report `internal` so the chord always completes. Every task carries the audit's `run_id` and ignores a run
-  a rerun replaced. `sweep_stuck_audits` (beat, 10 min) fails audits running longer than
+  a rerun replaced. `sweep_stuck_audits` (beat, 10 min) fails audits pending or running longer than
   `SITEINTEL_AUDIT_STUCK_MINUTES` and signals once. Poll interval and budget are clamped at read time.
 - **Safety.** SSRF guard on every outbound request (every redirect hop re-validated, headers never sent to
   another host, body capped); `processed` snapshots stripped of base64 and screenshots, lists trimmed, bounded
@@ -30,7 +30,12 @@ report per source, reused while valid, announced by the `report_ready` signal.
 - **Edge cases covered:** S-01 … S-09 in the unit suite; S-01, S-08, S-09 also in the emporium BDD feature
   `@siteintel`.
 - **Fix: `ExternalApiKey` admin change form no longer renders the stored key in plain text.** The key is a
-  write-only field (`new_key`, `PasswordInput`); leaving it blank on save keeps the stored value.
+  write-only field (`new_key`, `PasswordInput`); leaving it blank on save keeps the stored value. The add
+  form requires it, so no empty key is created.
 - **Fix: one in-flight audit per (domain, channel).** A database constraint (migration `0003`) rejects a
   second `pending`/`running` `Audit` row for the same domain and channel; `request_audit` catches the race
-  and returns the winning audit instead of creating a duplicate.
+  and returns the winning audit instead of creating a duplicate (never `None`: a winner that already finished is
+  found as the valid or newest audit). The migration first fails all but the newest duplicate in-flight audit.
+  A rerun that would put a second audit in flight answers 409 `audit_in_flight` instead of a 500.
+- **Fix: a lost `pending` audit no longer blocks its domain.** `sweep_stuck_audits` fails `pending` audits
+  older than `SITEINTEL_AUDIT_STUCK_MINUTES` too.

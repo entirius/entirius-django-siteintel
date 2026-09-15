@@ -39,3 +39,18 @@ def test_item6_admin_new_key_replaces_stored_one(admin_client, change_url, api_k
     _post(admin_client, change_url, NEW_KEY)
     api_key.refresh_from_db()
     assert api_key.key == NEW_KEY
+
+
+ADD_URL = "/admin/django_siteintel/externalapikey/add/"
+
+
+def test_item6_admin_add_form_requires_key(admin_client, db):
+    response = admin_client.post(ADD_URL, {"source": "urlscan", "is_active": "on", "new_key": ""})
+
+    assert response.status_code == 200 and "new_key" in response.context["adminform"].form.errors
+    assert not ExternalApiKey.objects.filter(source="urlscan").exists()
+
+
+def test_item6_admin_add_form_stores_key(admin_client, db):
+    assert admin_client.post(ADD_URL, {"source": "urlscan", "is_active": "on", "new_key": NEW_KEY}).status_code == 302
+    assert ExternalApiKey.objects.get(source="urlscan").key == NEW_KEY

@@ -100,15 +100,19 @@ or poll never writes into the new run.
   same domain is never returned.
 - **One in-flight audit per domain and channel.** A database constraint allows only one `pending`/`running`
   `Audit` row per (`domain`, `channel_idx`). Two concurrent first requests for the same domain race to create
-  it; the loser's `IntegrityError` is caught and it returns the winner's audit instead of a duplicate.
+  it; the loser's `IntegrityError` is caught and it returns the winner's audit instead of a duplicate — or, if
+  the winner already finished, the valid audit of the domain, else its newest one. Migration `0003` fails all
+  but the newest in-flight duplicate before it adds the constraint.
 - **Rerun.** `rerun_audit(audit, requested_by)` keeps the audit id, resets every report to `pending` (raw,
   processed, retries and errors cleared), extends `expires_at` and queues a new run. It is refused with
-  `AuditRunningError` while the audit is `running`; the caller's instance is left untouched.
+  `AuditRunningError` while the audit is `running`, and with `AuditInFlightError` while another audit of the
+  same domain and channel is `pending`/`running`; the caller's instance is left untouched.
 - **Expiry.** `expire_audits(now=None)` marks valid audits past `expires_at` as `expired`
   (`SITEINTEL_EXPIRE_DAYS`, default 90). Rows and reports stay; the next request creates a new audit.
-- **Stuck audits.** `fail_stuck_audits(now=None)` fails audits `running` longer than
+- **Stuck audits.** `fail_stuck_audits(now=None)` fails audits `pending` or `running` longer than
   `SITEINTEL_AUDIT_STUCK_MINUTES` (default 30), marks their unfinished reports `failed(timeout)` and sends
-  `report_ready` once, after the commit. A lost poll task is also bounded inside the run: `finish_audit`
+  `report_ready` once, after the commit. A `pending` audit whose `run_audit` message was lost would otherwise
+  block its domain and channel forever. A lost poll task is also bounded inside the run: `finish_audit`
   re-checks for one poll budget plus one interval, then fails whatever is still running.
 
 ## The `report_ready` signal

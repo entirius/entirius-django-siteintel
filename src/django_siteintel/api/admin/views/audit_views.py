@@ -28,6 +28,12 @@ class AuditRunning(APIException):
     default_code = "audit_running"
 
 
+class AuditInFlight(APIException):
+    status_code = 409
+    default_detail = "Another audit of this domain is pending or running on the channel; rerun it once it has finished."
+    default_code = "audit_in_flight"
+
+
 class AuditPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = "page_size"
@@ -108,6 +114,8 @@ class AuditRerunView(AdminView):
             audit = audit_service.rerun_audit(audit=self.audit(channel_idx, audit_id), requested_by=requested_by)
         except audit_service.AuditRunningError:
             raise AuditRunning() from None
+        except audit_service.AuditInFlightError:
+            raise AuditInFlight() from None
         return Response(AuditResponse.model_validate(audit).model_dump(mode="json"), status=202)
 
 

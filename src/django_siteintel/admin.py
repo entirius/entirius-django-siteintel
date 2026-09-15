@@ -32,7 +32,7 @@ class AuditAdmin(admin.ModelAdmin):
 
 
 class ExternalApiKeyForm(forms.ModelForm):
-    """`key` is never a form field (it would come back pre-filled): `new_key` is write-only, blank keeps it."""
+    """`key` is never a form field (it would come back pre-filled): `new_key` is write-only, blank keeps it on edit."""
 
     new_key = forms.CharField(
         required=False, label="Key", widget=forms.PasswordInput(render_value=False),
@@ -42,6 +42,12 @@ class ExternalApiKeyForm(forms.ModelForm):
     class Meta:
         model = ExternalApiKey
         fields = ("source", "is_active")
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if self.instance._state.adding:  # a new key has nothing to keep (item 6)
+            self.fields["new_key"].required = True
+            self.fields["new_key"].help_text = ""
 
     def save(self, commit: bool = True) -> ExternalApiKey:
         new_key = self.cleaned_data.get("new_key", "").strip()

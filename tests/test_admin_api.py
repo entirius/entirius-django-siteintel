@@ -127,3 +127,16 @@ def test_long_domain_without_scheme_is_400(admin_api, recordings, monkeypatch):
 
     assert _create(admin_api, at_limit).status_code == 201
     assert _create(admin_api, at_limit + "x").status_code == 400
+
+
+def test_item1_rerun_while_another_audit_in_flight_409(admin_api, recordings, monkeypatch):
+    monkeypatch.setattr("django_siteintel.tasks.run_audit.delay", lambda audit_id: None)
+    old_id = _create(admin_api).json()["id"]
+    Audit.objects.filter(pk=old_id).update(status=AuditStatus.EXPIRED)
+    _create(admin_api)
+
+    response = admin_api.post(api_url(f"audits/{old_id}/rerun/"), {}, format="json")
+
+    assert response.status_code == 409
+    assert {"error", "message", "debug_id"} <= set(response.json())
+    assert Audit.objects.get(pk=old_id).status == AuditStatus.EXPIRED

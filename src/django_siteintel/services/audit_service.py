@@ -44,13 +44,15 @@ def request_audit(*, domain_or_url: str, channel_idx: str, requested_by: str) ->
             Report.objects.bulk_create([Report(audit=audit, source=source) for source in list_sources()])
             _dispatch_run(audit)
     except IntegrityError:
-        return _find_in_flight_audit(domain, channel_idx)  # a concurrent request won the race (item 7)
+        return _find_race_winner(domain, channel_idx)  # a concurrent request won the race (item 7)
     return audit
 
 
-def _find_in_flight_audit(domain: str, channel_idx: str) -> Audit:
-    in_flight = Audit.objects.filter(domain=domain, channel_idx=channel_idx, status__in=IN_FLIGHT_AUDIT_STATUSES)
-    return in_flight.order_by("-created_at").first()
+def _find_race_winner(domain: str, channel_idx: str) -> Audit:
+    """The in-flight audit; if the winner already finished, the valid one, else the newest (never None)."""
+    audits = Audit.objects.filter(domain=domain, channel_idx=channel_idx).order_by("-created_at")
+    in_flight = audits.filter(status__in=IN_FLIGHT_AUDIT_STATUSES).first()
+    return in_flight or find_valid_audit(domain, channel_idx) or audits.first()
 
 
 def find_valid_audit(domain: str, channel_idx: str) -> Audit | None:
@@ -65,8 +67,21 @@ class AuditRunningError(Exception):
     """A rerun was requested while the audit's current run is still in progress."""
 
 
+class AuditInFlightError(Exception):
+    """A rerun was requested while another audit of the same domain and channel is pending or running."""
+
+
 def rerun_audit(*, audit: Audit, requested_by: str) -> Audit:
     """Same audit row, reports reset to pending, expiry extended, a new run queued (S-09); refused while running."""
+    try:
+        _reset_for_rerun(audit, requested_by)
+    except IntegrityError:
+        raise AuditInFlightError(str(audit.pk)) from None  # the one-in-flight constraint (item 1)
+    audit.refresh_from_db()
+    return audit
+
+
+def _reset_for_rerun(audit: Audit, requested_by: str) -> None:
     fields = {
         "status": AuditStatus.PENDING,
         "requested_by": requested_by,
@@ -82,8 +97,6 @@ def rerun_audit(*, audit: Audit, requested_by: str) -> Audit:
             error_detail="", modified_at=timezone.now(),
         )  # fmt: skip
         _dispatch_run(audit)
-    audit.refresh_from_db()
-    return audit
 
 
 def expire_audits(now: datetime | None = None) -> int:
@@ -93,10 +106,12 @@ def expire_audits(now: datetime | None = None) -> int:
 
 
 def fail_stuck_audits(now: datetime | None = None) -> int:
-    """Audits `running` longer than `SITEINTEL_AUDIT_STUCK_MINUTES` fail, with their unfinished reports."""
+    """Audits `pending`/`running` longer than `SITEINTEL_AUDIT_STUCK_MINUTES` fail, with their unfinished reports."""
     now = now or timezone.now()
     cutoff = now - timedelta(minutes=siteintel_settings.value("SITEINTEL_AUDIT_STUCK_MINUTES"))
-    stuck = Audit.objects.filter(status=AuditStatus.RUNNING, modified_at__lt=cutoff).values_list("pk", flat=True)
+    stuck = Audit.objects.filter(status__in=IN_FLIGHT_AUDIT_STATUSES, modified_at__lt=cutoff).values_list(
+        "pk", flat=True
+    )
     return sum(_fail_stuck_audit(audit_id, cutoff, now) for audit_id in list(stuck))
 
 
@@ -104,13 +119,13 @@ def _fail_stuck_audit(audit_id, cutoff: datetime, now: datetime) -> bool:
     """Like `report_service.finish`: the locked row is re-checked, `report_ready` is sent once after the commit."""
     with transaction.atomic():
         audit = Audit.objects.select_for_update().get(pk=audit_id)
-        if audit.status != AuditStatus.RUNNING or audit.modified_at >= cutoff:
+        if audit.status not in IN_FLIGHT_AUDIT_STATUSES or audit.modified_at >= cutoff:
             return False  # finished or rerun since the scan
         unfinished = audit.reports.exclude(status__in=FINISHED_REPORT_STATUSES)
         unfinished.update(
             status=ReportStatus.FAILED,
             error_code=ErrorCode.TIMEOUT,
-            error_detail="audit stuck running",
+            error_detail=f"audit stuck {audit.status}",
             modified_at=now,
         )
         succeeded = sorted(audit.reports.filter(status__in=SUCCEEDED_REPORT_STATUSES).values_list("source", flat=True))
