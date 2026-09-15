@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 — 2026-09-15
 
 First release. Domain intelligence for Volkanos: one audit per registrable domain and channel, one cleaned
 report per source, reused while valid, announced by the `report_ready` signal.
