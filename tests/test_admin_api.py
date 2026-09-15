@@ -139,4 +139,5 @@ def test_item1_rerun_while_another_audit_in_flight_409(admin_api, recordings, mo
 
     assert response.status_code == 409
     assert {"error", "message", "debug_id"} <= set(response.json())
+    assert response.json()["error"] == "AUDIT_IN_FLIGHT"
     assert Audit.objects.get(pk=old_id).status == AuditStatus.EXPIRED
