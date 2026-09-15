@@ -1,9 +1,11 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
+import threading
 from datetime import timedelta
 
 import pytest
+from django.db import IntegrityError, connection
 from django.utils import timezone
 
 from django_siteintel.enums import AuditStatus, ReportStatus
@@ -97,6 +99,31 @@ def test_S09_rerun_resets_reports_same_audit_id(
     assert audit_service.run_now(rerun).status == AuditStatus.COMPLETED and len(signals) == 2
 
 
+@pytest.mark.django_db(transaction=True)
+def test_item7_concurrent_first_requests_create_one_audit(monkeypatch):
+    """Real Postgres, two threads racing `request_audit`: the unique constraint leaves one audit."""
+    monkeypatch.setattr("django_siteintel.tasks.run_audit.delay", lambda audit_id: None)
+    results: list[Audit] = []
+    barrier = threading.Barrier(2)
+
+    def create() -> None:
+        barrier.wait()
+        try:
+            results.append(_request())
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=create) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(results) == 2
+    assert results[0].pk == results[1].pk
+    assert Audit.objects.filter(domain=DOMAIN, channel_idx=CHANNEL_IDX).count() == 1
+
+
 def test_S01_reuse_is_scoped_to_channel(db, recordings, signals, monkeypatch):
     first = audit_service.run_now(_request())
     monkeypatch.setattr("django_siteintel.tasks.run_audit.delay", lambda audit_id: None)
@@ -166,3 +193,51 @@ def test_rerun_conflict_leaves_instance_unchanged(db, recordings):
         audit_service.rerun_audit(audit=audit, requested_by="cms:admin")
 
     assert (audit.status, audit.run_id, audit.requested_by, audit.expires_at, audit.modified_at) == before
+
+
+def test_item1_rerun_while_another_audit_in_flight_is_refused(db, recordings, monkeypatch):
+    monkeypatch.setattr("django_siteintel.tasks.run_audit.delay", lambda audit_id: None)
+    old = audit_service.run_now(_request())
+    Audit.objects.filter(pk=old.pk).update(status=AuditStatus.EXPIRED)
+    in_flight = _request()
+
+    with pytest.raises(audit_service.AuditInFlightError):
+        audit_service.rerun_audit(audit=old, requested_by="cms:admin")
+
+    assert Audit.objects.get(pk=old.pk).status == AuditStatus.EXPIRED
+    assert Audit.objects.get(pk=in_flight.pk).status == AuditStatus.PENDING
+
+
+def test_item2_sweeper_fails_lost_pending_audit_and_unblocks_domain(db, recordings, settings, monkeypatch):
+    settings.SITEINTEL_AUDIT_STUCK_MINUTES = 30
+    monkeypatch.setattr("django_siteintel.tasks.run_audit.delay", lambda audit_id: None)  # the message is lost
+    lost, fresh = _request(), _request("other-shop.test")
+    Audit.objects.filter(pk=lost.pk).update(modified_at=timezone.now() - timedelta(minutes=31))
+    assert _request().pk == lost.pk  # blocks the domain until swept
+
+    assert audit_service.fail_stuck_audits() == 1
+
+    assert Audit.objects.get(pk=lost.pk).status == AuditStatus.FAILED
+    assert Audit.objects.get(pk=fresh.pk).status == AuditStatus.PENDING
+    assert set(lost.reports.values_list("status", "error_detail")) == {("failed", "audit stuck pending")}
+    assert _request().pk != lost.pk
+
+
+def _lose_the_race(**kwargs):
+    raise IntegrityError("siteintel_audit_one_in_flight_per_domain_channel")
+
+
+def test_item4_race_loser_falls_back_to_the_finished_winner(db, recordings, monkeypatch):
+    winner = audit_service.run_now(_request())
+    monkeypatch.setattr(audit_service, "find_valid_audit", lambda domain, channel_idx: None)  # both miss reuse
+    monkeypatch.setattr(Audit.objects, "create", _lose_the_race)
+
+    assert _request().pk == winner.pk  # finished before the loser's lookup, still returned
+
+
+def test_item4_race_loser_prefers_the_valid_audit_over_a_newer_failed_one(db, recordings):
+    valid = audit_service.run_now(_request())
+    failed = audit_service.run_now(_request("other-shop.test"))
+    Audit.objects.filter(pk=failed.pk).update(domain=DOMAIN, status=AuditStatus.FAILED)
+
+    assert audit_service._find_race_winner(DOMAIN, CHANNEL_IDX).pk == valid.pk

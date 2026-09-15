@@ -74,7 +74,7 @@ Create, rerun and expire-now forbid unknown fields; the list query ignores them.
 | 401 | no or invalid JWT |
 | 403 | authenticated but not staff |
 | 404 | audit id unknown or in another channel; `test/` routes outside development |
-| 409 | `rerun/` while the audit is `running` (`audit_running`) |
+| 409 | `rerun/` while the audit is `running` (`audit_running`); `rerun/` while another audit of the same domain is `pending` or `running` on the channel (`audit_in_flight`) |
 
 ## OpenAPI
 

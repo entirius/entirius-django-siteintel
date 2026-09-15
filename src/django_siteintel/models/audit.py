@@ -7,7 +7,7 @@ import uuid
 from django.db import models
 from django_utils.models.base_model import BaseModel
 
-from django_siteintel.enums import AuditStatus
+from django_siteintel.enums import IN_FLIGHT_AUDIT_STATUSES, AuditStatus
 
 
 class Audit(BaseModel):
@@ -25,6 +25,15 @@ class Audit(BaseModel):
 
     class Meta:
         indexes = [models.Index(fields=["domain", "status"], name="siteintel_audit_domain_status")]
+        constraints = [
+            # Concurrent first requests for one domain must not create two audits (item 7): only one
+            # pending/running row per (domain, channel) at a time; finished/expired rows are unrestricted.
+            models.UniqueConstraint(
+                fields=["domain", "channel_idx"],
+                condition=models.Q(status__in=IN_FLIGHT_AUDIT_STATUSES),
+                name="siteintel_audit_one_in_flight_per_domain_channel",
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.domain} ({self.status})"

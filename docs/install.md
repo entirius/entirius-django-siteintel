@@ -60,10 +60,11 @@ so `override_settings` and the host always win.
 ## API keys
 
 Keys are rows, not settings: one `ExternalApiKey` per source (`lighthouse`, `urlscan`), `is_active = True`,
-entered in the Django admin (the list shows only `set` / `empty`). The PSI key is sent in the
-`X-Goog-Api-Key` header, the urlscan key in `API-Key`. PSI works without a key at a low anonymous quota —
-expect `upstream` failures under load; urlscan's submit needs one. `heuristic` needs none. Recording mode
-sends no key.
+entered in the Django admin (the list, and the change form's "key" field, only ever show `set` / `empty` —
+the stored value is never rendered; leaving the field blank on save keeps the stored key). The PSI key is
+sent in the `X-Goog-Api-Key` header, the urlscan key in `API-Key`. PSI works without a key at a low anonymous
+quota — expect `upstream` failures under load; urlscan's submit needs one. `heuristic` needs none. Recording
+mode sends no key.
 
 ## Bootstrap order
 

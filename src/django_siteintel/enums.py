@@ -15,6 +15,8 @@ class AuditStatus(models.TextChoices):
 
 
 REUSABLE_AUDIT_STATUSES = (AuditStatus.COMPLETED, AuditStatus.PARTIALLY_COMPLETED)
+# One row per (domain, channel) may be in flight at a time — see the audit's unique constraint.
+IN_FLIGHT_AUDIT_STATUSES = (AuditStatus.PENDING, AuditStatus.RUNNING)
 
 
 class ReportStatus(models.TextChoices):

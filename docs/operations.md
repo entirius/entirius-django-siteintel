@@ -18,7 +18,7 @@ countdown re-dispatch.
 | `django_siteintel.poll_urlscan(report_id, uuid, deadline_iso, run_id)` | `run_source`, then itself | one poll; re-dispatched every `SITEINTEL_URLSCAN_POLL_INTERVAL_S` until the result arrives or the deadline passes (`timeout`) |
 | `django_siteintel.finish_audit(audit_id, run_id, attempt)` | chord callback, then itself | closes the run when every report is finished and sends `report_ready`; re-checks for one poll budget plus one interval, then fails what is still running |
 | `django_siteintel.expire_audits()` | beat, daily | valid audits past `expires_at` → `expired`; returns the count |
-| `django_siteintel.sweep_stuck_audits()` | beat, every 10 min | audits `running` longer than `SITEINTEL_AUDIT_STUCK_MINUTES` → `failed`, `report_ready` once; returns the count |
+| `django_siteintel.sweep_stuck_audits()` | beat, every 10 min | audits `pending`/`running` longer than `SITEINTEL_AUDIT_STUCK_MINUTES` → `failed`, `report_ready` once; returns the count |
 
 Tasks of a replaced run (a rerun drew a new `run_id`) find nothing and return. A `run_source` message without
 `run_id` — queued by an older release — is treated as stale too.

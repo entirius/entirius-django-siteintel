@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+from django import forms
 from django.contrib import admin
 
 from django_siteintel.models import Audit, ExternalApiKey, Report
@@ -30,10 +31,37 @@ class AuditAdmin(admin.ModelAdmin):
         return False
 
 
+class ExternalApiKeyForm(forms.ModelForm):
+    """`key` is never a form field (it would come back pre-filled): `new_key` is write-only, blank keeps it on edit."""
+
+    new_key = forms.CharField(
+        required=False, label="Key", widget=forms.PasswordInput(render_value=False),
+        help_text="Leave blank to keep the stored key.",
+    )  # fmt: skip
+
+    class Meta:
+        model = ExternalApiKey
+        fields = ("source", "is_active")
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if self.instance._state.adding:  # a new key has nothing to keep (item 6)
+            self.fields["new_key"].required = True
+            self.fields["new_key"].help_text = ""
+
+    def save(self, commit: bool = True) -> ExternalApiKey:
+        new_key = self.cleaned_data.get("new_key", "").strip()
+        if new_key:
+            self.instance.key = new_key
+        return super().save(commit=commit)
+
+
 @admin.register(ExternalApiKey)
 class ExternalApiKeyAdmin(admin.ModelAdmin):
+    form = ExternalApiKeyForm
     list_display = ("source", "masked_key", "is_active", "modified_at")
     list_filter = ("is_active",)
+    fields = ("source", "is_active", "new_key")
 
     @admin.display(description="key")
     def masked_key(self, obj: ExternalApiKey) -> str:
