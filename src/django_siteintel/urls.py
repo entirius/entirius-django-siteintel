@@ -1,7 +1,9 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
-from django.contrib import admin
+
+"""Root URL config for django_siteintel — mounts the Admin API v2 namespace."""
+
 from django.urls import include, path
 
-urlpatterns = [path("admin/", admin.site.urls), path("", include("django_siteintel.urls"))]
+urlpatterns = [path("api/siteintel/v2/admin/<str:channel_idx>/", include("django_siteintel.api.admin.urls"))]
