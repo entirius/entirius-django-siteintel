@@ -1,6 +1,6 @@
 ---
 title: Operations
-description: Day 2 — Celery tasks and schedules, reading a failed report, outbound fetches (SSRF guard), recording mode, adding a source.
+description: Day 2 — Celery tasks and schedules, reading a failed report, outbound fetches (SSRF guard), recording mode, configuration health, adding a source.
 ---
 
 Install-time facts — prerequisites, wiring, the settings table, API keys — are in `install.md`. This file
@@ -68,6 +68,22 @@ A base URL other than the public API makes the source read files instead of call
 `<domain>` is the registrable domain of the audit. Recording mode sends no API key and still goes through the
 SSRF guard, so a private recording host needs `SITEINTEL_ALLOWED_HOSTS`. The heuristic source always fetches
 the audited URL.
+
+## Configuration health
+
+Two system checks feed django-munin's configuration-health panel (portal `guides/configuration.md`):
+
+| Code | Kind | Row per source (`scope` = `lighthouse` / `urlscan`) |
+|---|---|---|
+| `siteintel.sources` | config check, tag `entirius_config`, no network | `recording` (high) — the base URL is not the public API, audits read recorded answers and real sites are not audited; `unconfigured` — no active `ExternalApiKey`: urlscan high (every submit 401), lighthouse medium (anonymous PSI quota). Key rows are read only when the caller passes `databases` and the table exists; in recording mode keys are not checked (no key is sent) |
+| `siteintel.keys` | probe, tag `entirius_probe`, `deploy=True` | `auth_failed` / `unreachable` — one call per active key with a 5 s timeout: urlscan `GET /user/quotas/`, PSI `runPagespeed` without a `url` (Google checks the key, then answers 400 — no Lighthouse run). Success is cached 60 s, a failure never; never raises; skipped in recording mode and without a key |
+
+```bash
+python manage.py check --database default --tag entirius_config    # both sources, keys included
+python manage.py check --deploy --tag siteintel.keys                # live key probe, on demand
+```
+
+A healthy module prints nothing for `siteintel.sources`; munin shows it as one green row.
 
 ## Adding a source
 
