@@ -8,7 +8,6 @@
 public API, so it runs only on an explicit request (munin's "Check again", ``check --deploy``).
 """
 
-import hashlib
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
@@ -16,6 +15,7 @@ from urllib.parse import urlparse
 
 import requests
 from django.core.cache import cache
+from django.utils.crypto import salted_hmac
 
 from django_siteintel import settings as siteintel_settings
 from django_siteintel.sources.base import api_key
@@ -93,7 +93,10 @@ def key_probe(source: KeyedSource) -> SourceStatus:
 
 
 def _cached_probe(source: KeyedSource, key: str) -> SourceStatus:
-    cache_key = CACHE_KEY.format(source=source.name, fingerprint=hashlib.sha256(key.encode()).hexdigest()[:12])
+    # A keyed fingerprint (HMAC with the server secret), so a changed key misses the cache and the cache never holds
+    # anything derived from the key alone.
+    fingerprint = salted_hmac("django_siteintel.key_probe", key, algorithm="sha256").hexdigest()[:12]
+    cache_key = CACHE_KEY.format(source=source.name, fingerprint=fingerprint)
     if cache.get(cache_key) is not None:
         return SourceStatus.CONFIGURED
     result = _probe(source, key)
