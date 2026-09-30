@@ -35,6 +35,7 @@ table prefix `django_siteintel_`.
 ```
 src/django_siteintel/
 ├── apps.py  enums.py (statuses, ErrorCode)  settings.py (value(), clamped poll settings, recording_mode)
+├── checks.py      config health: siteintel.sources (recording / missing key), siteintel.keys (probe)
 ├── models/        audit.py (Audit, run_id)  report.py (Report)  external_api_key.py
 ├── schemas/       requests.py  responses.py
 ├── api/admin/     urls.py  views/_base.py (AdminView: JWT + IsAdminUser)  audit_views.py  test_views.py (development)
@@ -43,7 +44,7 @@ src/django_siteintel/
 ├── sources/       base.py (SourceFetcher, SourceError — the contract)  registry.py (entry points `siteintel_sources`)
 │                  lighthouse.py (PSI v5)  urlscan.py (submit + poll)  heuristic.py (own fetch)
 ├── services/      audit_service (request, rerun, expire, sweep, run_now)  report_service (run, poll, fail, finish)
-│                  cleaning_service (snapshot trimming, NUL strip)
+│                  cleaning_service (snapshot trimming, NUL strip)  source_status (recording, key, cached key probe)
 ├── security/      url_guard.py (safe_get, safe_post — a copy of lookup's guard)
 ├── signals/       report_ready(audit, succeeded_sources)
 ├── tasks/         run_audit  run_source  poll_urlscan  finish_audit  expire_audits  sweep_stuck_audits

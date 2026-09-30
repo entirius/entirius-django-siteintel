@@ -1,7 +1,7 @@
 
 [project]
 name = "entirius-django-siteintel"
-version = "0.1.0"
+version = "0.2.0"
 description = "Domain intelligence for the Volkanos platform: Lighthouse, URLScan and heuristic audits per domain"
 authors = [{ name = "Entirius" }]
 maintainers = [
