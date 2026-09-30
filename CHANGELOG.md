@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-09-30
 
 - **Configuration health.** `siteintel.sources` (tag `entirius_config`) reports per source when audits read
   recorded answers instead of the public API (`recording`, high) and when a live source has no active
