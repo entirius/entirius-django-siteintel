@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Configuration health.** `siteintel.sources` (tag `entirius_config`) reports per source when audits read
+  recorded answers instead of the public API (`recording`, high) and when a live source has no active
+  `ExternalApiKey` (`unconfigured`: urlscan high, lighthouse medium); key rows are read only under the
+  `databases` + table guard. `siteintel.keys` (tag `entirius_probe`, deploy-only) makes one authenticated call
+  per active key — urlscan quota, PSI without a `url` — cached 60 s on success, never raising →
+  `auth_failed` / `unreachable`; skipped in recording mode. `docs/operations.md` § Configuration health.
+
 ## 0.1.0 — 2026-09-15
 
 First release. Domain intelligence for Volkanos: one audit per registrable domain and channel, one cleaned

@@ -9,3 +9,6 @@ class DjangoSiteintelConfig(AppConfig):
     name = "django_siteintel"
     label = "django_siteintel"
     is_volkanos = True
+
+    def ready(self) -> None:
+        from django_siteintel import checks  # noqa: F401 — registers the configuration health checks
