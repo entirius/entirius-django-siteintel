@@ -27,6 +27,8 @@ def is_development() -> bool:
 
 
 class _DevelopmentView(AdminView):
+    access_area = "platform.devtools"
+
     def initial(self, request: Request, *args, **kwargs) -> None:
         if not is_development():
             raise NotFound()
