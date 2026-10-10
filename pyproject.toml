@@ -2,7 +2,21 @@
 [project]
 name = "entirius-django-siteintel"
 version = "0.2.0"
-description = "Domain intelligence for the Volkanos platform: Lighthouse, URLScan and heuristic audits per domain"
+description = "Domain intelligence for Entirius: PageSpeed Insights, urlscan.io and heuristic audits per domain"
+keywords = ["django", "site-audit", "lighthouse", "pagespeed", "urlscan", "celery", "ecommerce", "entirius"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Django",
+    "Framework :: Django :: 5.2",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+]
 authors = [{ name = "Entirius" }]
 maintainers = [
     { name = "Piotr Brzozowski", email = "piotrb@entirius.com" },
@@ -29,7 +43,11 @@ dev  = ["ruff", "pre-commit"]
 test = ["pytest", "pytest-django", "factory-boy", "psycopg[binary]>=3.1", "dj-database-url>=2.0"]
 
 [project.urls]
+Homepage = "https://docs.entirius.com/"
+Documentation = "https://github.com/entirius/entirius-django-siteintel/tree/develop/docs"
 Repository = "https://github.com/entirius/entirius-django-siteintel"
+Changelog = "https://github.com/entirius/entirius-django-siteintel/blob/develop/CHANGELOG.md"
+Issues = "https://github.com/entirius/entirius-django-siteintel/issues"
 
 [project.entry-points."siteintel_sources"]
 lighthouse = "django_siteintel.sources.lighthouse:LighthouseSource"

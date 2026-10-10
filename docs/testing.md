@@ -7,7 +7,8 @@ Postgres only (`tests/settings.py`): `DATABASE_URL` wins (zeno container), else
 `postgresql://entirius:entirius-dev@localhost:5532/entirius` (zeno's published port). HTTP is never real:
 `tests/fake_http.py` patches `requests` and records every call; `recordings` (conftest) serves PSI / urlscan
 recordings for `example-shop-1.test` and a synthetic page. `ENVIRONMENT = "development"`, so the `test/`
-routes are mounted. Edge-case IDs (`S-01` … `S-09`) return in the test names.
+routes are mounted at import. Migrations run in tests; Celery runs eagerly where a test needs the chord
+(`eager_celery`). Edge-case IDs (`S-01` … `S-09`) return in the test names.
 
 | File | Covers |
 |---|---|
@@ -22,6 +23,28 @@ routes are mounted. Edge-case IDs (`S-01` … `S-09`) return in the test names.
 | `test_admin.py` | item6 the `ExternalApiKey` change form never renders the stored key; a blank submit keeps it; a new value replaces it; the add form requires a key |
 | `test_migrations.py` | item5 migration `0003` fails all but the newest duplicate in-flight audit before adding the constraint |
 
-BDD (emporium `features/siteintel/siteintel_audit.feature`, tag `@siteintel`) covers S-01, S-08 and S-09
-against zeno with the recordings in `fixtures/siteintel/`; the leads funnel (`@funnel`) exercises the module
-end to end through a stage rule. See `AGENTS.md` § Testing end-to-end.
+## Edge-case coverage and end-to-end layers
+
+| ID | Unit (`tests/`) | BDD (emporium `features/siteintel/siteintel_audit.feature`) |
+|---|---|---|
+| S-01 reuse of a valid audit, no fetch | `test_audit_service` (+ channel scope) | yes |
+| S-02 expired audit → new audit, history kept | `test_audit_service` | — |
+| S-03 PSI 429/5xx → retries → partially completed | `test_tasks` | — |
+| S-04 urlscan poll budget → timeout, no sleep | `test_tasks` | — |
+| S-05 private host / redirect to 10.x refused | `test_url_guard` | — |
+| S-06 page over the byte cap → partial(truncated) | `test_url_guard` | — |
+| S-07 base64 stripped, lists trimmed, < 64 KB | `test_sources` | — |
+| S-08 heuristic differs per synthetic site | `test_sources` | yes |
+| S-09 re-audit refreshes reports (409 while running) | `test_audit_service`, `test_admin_api` | yes |
+
+BDD (emporium `features/siteintel/siteintel_audit.feature`, tag `@siteintel`) covers S-01, S-08 and S-09 with
+the recordings in emporium `fixtures/siteintel/`. In the entirius-zeno harness: `make module-test
+MODULE=entirius-django-siteintel` runs this suite in the service container and `make bdd TAGS=@siteintel` the BDD
+layer; the harness points both base URLs at its `fixtures` container (recording mode). Not one-shot: the Background
+expires every valid audit through `test/expire-now/`, so the feature re-runs on one seed.
+
+The module also runs inside the leads funnel (`@funnel`, one-shot per seed): stage rule → audit →
+`report_ready` → intel. Guides: the Entirius documentation at https://docs.entirius.com/ and emporium
+`docs/e2e-leads-funnel.md`.
+
+Restart the worker after task changes — Celery has no autoreload.
