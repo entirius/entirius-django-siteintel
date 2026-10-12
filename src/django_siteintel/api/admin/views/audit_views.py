@@ -41,6 +41,8 @@ class AuditPagination(PageNumberPagination):
 
 
 class AuditListView(AdminView):
+    access_area = "siteintel.audits"
+
     @extend_schema(
         tags=_TAGS,
         operation_id="siteintel_audits_list",
@@ -89,6 +91,8 @@ class AuditListView(AdminView):
 
 
 class AuditDetailView(AdminView):
+    access_area = "siteintel.audits"
+
     @extend_schema(
         tags=_TAGS,
         operation_id="siteintel_audits_detail",
@@ -100,6 +104,8 @@ class AuditDetailView(AdminView):
 
 
 class AuditRerunView(AdminView):
+    access_area = "siteintel.audits"
+
     @extend_schema(
         tags=_TAGS,
         operation_id="siteintel_audits_rerun",

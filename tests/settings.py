@@ -1,9 +1,11 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 """Standalone test settings — Postgres via DATABASE_URL (zeno container), else zeno's published port 5532."""
 
 import os
+from importlib.util import find_spec
 
 import dj_database_url
 
@@ -22,6 +24,9 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "django_siteintel",
 ]
+# django_access when importable (zeno): tests/test_access_ownership.py proves the access declarations.
+if find_spec("django_access"):
+    INSTALLED_APPS.append("django_access")
 MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
