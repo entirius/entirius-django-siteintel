@@ -1,7 +1,7 @@
 
 [project]
 name = "entirius-django-siteintel"
-version = "0.2.0"
+version = "0.3.0"
 description = "Domain intelligence for Entirius: PageSpeed Insights, urlscan.io and heuristic audits per domain"
 keywords = ["django", "site-audit", "lighthouse", "pagespeed", "urlscan", "celery", "ecommerce", "entirius"]
 classifiers = [
